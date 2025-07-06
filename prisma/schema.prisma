@@ -1,0 +1,298 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  firstName String
+  lastName  String
+  phone     String?
+  role      UserRole @default(CUSTOMER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  orders    Order[]
+  reviews   Review[]
+  addresses Address[]
+  cart      CartItem[]
+
+  @@map("users")
+}
+
+model Manager {
+  id         String   @id @default(cuid())
+  userId     String   @unique
+  categoryId String
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // Relations
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id])
+  orders   Order[]
+
+  @@map("managers")
+}
+
+model Category {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  nameAr      String
+  nameEn      String
+  description String?
+  image       String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  products Product[]
+  managers Manager[]
+
+  @@map("categories")
+}
+
+model Product {
+  id              String   @id @default(cuid())
+  name            String
+  nameAr          String
+  nameEn          String
+  description     String
+  descriptionAr   String
+  descriptionEn   String
+  price           Int      // Price in centimes (DA)
+  originalPrice   Int?     // Original price for discounts
+  categoryId      String
+  material        String
+  materialAr      String
+  materialEn      String
+  dimensions      String   // JSON string for dimensions
+  images          String   // JSON array of image URLs
+  stock           Int      @default(0)
+  isActive        Boolean  @default(true)
+  isFeatured      Boolean  @default(false)
+  rating          Float    @default(0)
+  reviewCount     Int      @default(0)
+  salesCount      Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  category    Category     @relation(fields: [categoryId], references: [id])
+  orderItems  OrderItem[]
+  reviews     Review[]
+  cartItems   CartItem[]
+  customizations ProductCustomization[]
+
+  @@map("products")
+}
+
+model ProductCustomization {
+  id        String @id @default(cuid())
+  productId String
+  type      String // "finish", "dimension", etc.
+  name      String
+  nameAr    String
+  nameEn    String
+  value     String // JSON for complex values
+  priceModifier Float @default(0) // Percentage modifier
+
+  // Relations
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@map("product_customizations")
+}
+
+model Order {
+  id                String      @id @default(cuid())
+  orderNumber       String      @unique
+  userId            String
+  managerId         String?
+  status            OrderStatus @default(PENDING)
+  priority          Priority    @default(MEDIUM)
+  totalAmount       Int         // Total in centimes (DA)
+  deliveryPrice     Int         @default(0)
+  paymentMethod     String
+  paymentStatus     PaymentStatus @default(PENDING)
+  
+  // Customer Info
+  customerFirstName String
+  customerLastName  String
+  customerEmail     String
+  customerPhone     String
+  
+  // Delivery Info
+  deliveryAddress   String
+  deliveryCity      String
+  deliveryPostalCode String
+  deliveryDate      DateTime?
+  deliveryTime      String?
+  deliveryZone      String
+  deliveryService   String
+  specialInstructions String?
+  
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  // Relations
+  user      User        @relation(fields: [userId], references: [id])
+  manager   Manager?    @relation(fields: [managerId], references: [id])
+  items     OrderItem[]
+
+  @@map("orders")
+}
+
+model OrderItem {
+  id              String @id @default(cuid())
+  orderId         String
+  productId       String
+  quantity        Int
+  unitPrice       Int    // Price per unit in centimes
+  totalPrice      Int    // Total price for this item
+  customizations  String // JSON string for customizations
+  
+  // Relations
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+
+  @@map("order_items")
+}
+
+model CartItem {
+  id             String @id @default(cuid())
+  userId         String
+  productId      String
+  quantity       Int
+  customizations String // JSON string for customizations
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  // Relations
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, productId])
+  @@map("cart_items")
+}
+
+model Review {
+  id        String   @id @default(cuid())
+  userId    String
+  productId String
+  rating    Int      // 1-5 stars
+  comment   String?
+  isVerified Boolean @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, productId])
+  @@map("reviews")
+}
+
+model Address {
+  id         String  @id @default(cuid())
+  userId     String
+  type       String  // "home", "work", etc.
+  firstName  String
+  lastName   String
+  address    String
+  city       String
+  postalCode String
+  phone      String?
+  isDefault  Boolean @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("addresses")
+}
+
+model DeliveryZone {
+  id          String @id @default(cuid())
+  name        String @unique
+  nameAr      String
+  nameEn      String
+  price       Int    // Delivery price in centimes
+  deliveryTime String // e.g., "2-3 jours"
+  postalCodes String // JSON array of postal codes
+  isActive    Boolean @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("delivery_zones")
+}
+
+model DeliveryService {
+  id          String @id @default(cuid())
+  name        String @unique
+  nameAr      String
+  nameEn      String
+  description String
+  descriptionAr String
+  descriptionEn String
+  price       Int    // Additional price in centimes
+  features    String // JSON array of features
+  isActive    Boolean @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("delivery_services")
+}
+
+model Settings {
+  id    String @id @default(cuid())
+  key   String @unique
+  value String
+  type  String // "string", "number", "boolean", "json"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("settings")
+}
+
+// Enums
+enum UserRole {
+  CUSTOMER
+  MANAGER
+  ADMIN
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  IN_PROGRESS
+  READY_FOR_DELIVERY
+  DELIVERED
+  CANCELLED
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
