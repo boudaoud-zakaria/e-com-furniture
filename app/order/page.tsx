@@ -1,70 +1,108 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useTransition, useEffect, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
 import { 
   ShoppingCart, 
   User, 
   MapPin, 
-  CreditCard,
-  TreePine,
   ArrowLeft,
   CheckCircle,
-  Package,
   Truck,
-  Calendar,
   Phone,
-  Mail,
   Menu,
-  X
+  X,
+  TreePine
 } from 'lucide-react';
 import Link from 'next/link';
+import { createOrder } from '../../lib/action/order-actions'; // Import your server action
 
 const orderSteps = [
   { id: 1, name: 'Informations', icon: User },
   { id: 2, name: 'Livraison', icon: Truck },
-  { id: 3, name: 'Paiement', icon: CreditCard },
-  { id: 4, name: 'Confirmation', icon: CheckCircle }
+  { id: 3, name: 'Confirmation', icon: CheckCircle }
 ];
 
-export default function OrderPage() {
+const wilayaOptions = [
+  { value: 'alger', label: 'Alger', price: 0 },
+  { value: 'oran', label: 'Oran', price: 0 },
+  { value: 'blida', label: 'Blida', price: 1000 },
+  { value: 'boumerdes', label: 'Boumerdes', price: 2000 },
+  { value: 'bejaia', label: 'Bejaia', price: 3000 }
+];
+
+function OrderPageContent() {
   const [currentStep, setCurrentStep] = useState(1);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isPending, startTransition] = useTransition();
+  const [orderResult, setOrderResult] = useState<any>(null);
+  const [products, setProducts] = useState([]);
+  const [totalPrice, setTotalPrice] = useState(0);
+  const searchParams = useSearchParams();
+  
+  // Check if this is a cart order or single product order
+  const isCartOrder = searchParams.get('cart') === '1';
+  
+  // Get URL parameters for single product (fallback)
+  const productId = searchParams.get('product') || '';
+  const quantity = parseInt(searchParams.get('quantity') || '1');
+  const finish = searchParams.get('finish') || 'natural';
+  const dimensions = searchParams.get('dimensions') || '{"length":180,"width":90,"height":75}';
+  const urlPrice = parseInt(searchParams.get('price') || '89900');
+
   const [orderData, setOrderData] = useState({
-    // Customer Info
     firstName: '',
     lastName: '',
-    email: '',
     phone: '',
-    
-    // Delivery Info
-    address: '',
-    city: '',
-    postalCode: '',
-    deliveryDate: '',
-    deliveryTime: '',
-    specialInstructions: '',
-    
-    // Product Customization
-    dimensions: { length: 180, width: 90, height: 75 },
-    finish: 'natural',
-    quantity: 1,
-    
-    // Payment
-    paymentMethod: '',
-    cardNumber: '',
-    expiryDate: '',
-    cvv: ''
+    wilaya: '',
   });
 
-  const productPrice = 899;
-  const deliveryPrice = 25;
-  const totalPrice = (productPrice * orderData.quantity) + deliveryPrice;
+  // Initialize products based on order type
+  useEffect(() => {
+  if (isCartOrder) {
+    // Handle multiple products from cart
+    const totalProducts = parseInt(searchParams.get('total_products') || '0');
+    const cartProducts = [];
+    let calculatedTotal = 0;
+    
+    for (let i = 0; i < totalProducts; i++) {
+      const product = {
+        id: searchParams.get(`product_${i}`) || '',
+        quantity: parseInt(searchParams.get(`quantity_${i}`) || '1'),
+        finish: searchParams.get(`finish_${i}`) || 'natural',
+        dimensions: searchParams.get(`dimensions_${i}`) || '180x95x75 cm',
+        price: parseInt(searchParams.get(`price_${i}`) || '89900')
+      };
+      
+      cartProducts.push(product);
+      calculatedTotal += product.price * product.quantity;
+    }
+    
+    setProducts(cartProducts);
+    setTotalPrice(calculatedTotal);
+  } else {
+    // Handle single product - use price from URL
+    const singleProduct = {
+      id: productId,
+      quantity: quantity,
+      finish: finish,
+      dimensions: dimensions,
+      price: urlPrice // Use the price from URL
+    };
+    
+    setProducts([singleProduct]);
+    setTotalPrice(urlPrice * quantity); // Calculate total using URL price
+  }
+}, [searchParams, isCartOrder, productId, quantity, finish, dimensions, urlPrice]);
+
+  const selectedWilaya = wilayaOptions.find(w => w.value === orderData.wilaya);
+  const deliveryPrice = selectedWilaya?.price || 0;
+  const finalTotal = totalPrice + deliveryPrice;
 
   const handleInputChange = (field: string, value: string) => {
     setOrderData(prev => ({
@@ -74,7 +112,7 @@ export default function OrderPage() {
   };
 
   const nextStep = () => {
-    if (currentStep < 4) {
+    if (currentStep < 3) {
       setCurrentStep(currentStep + 1);
     }
   };
@@ -86,9 +124,48 @@ export default function OrderPage() {
   };
 
   const submitOrder = () => {
-    console.log('Order submitted:', orderData);
-    alert('Commande confirmée ! Vous recevrez un email de confirmation.');
+    startTransition(async () => {
+      const formData = new FormData();
+      
+      // Add customer info
+      formData.append('firstName', orderData.firstName);
+      formData.append('lastName', orderData.lastName);
+      formData.append('phone', orderData.phone);
+      formData.append('wilaya', orderData.wilaya);
+      
+      // Add cart indicator
+      formData.append('isCart', isCartOrder.toString());
+      
+      if (isCartOrder) {
+        // Add multiple products data
+        formData.append('products', JSON.stringify(products));
+      } else {
+        // Add single product data (existing logic)
+        formData.append('productId', productId);
+        formData.append('quantity', quantity.toString());
+        formData.append('finish', finish);
+        formData.append('dimensions', dimensions);
+      }
+
+      const result = await createOrder(formData);
+      
+      if (result.success) {
+        setOrderResult(result);
+        setCurrentStep(3);
+        
+        // Clear cart if it was a cart order
+        if (isCartOrder) {
+          localStorage.removeItem('cart');
+        }
+      } else {
+        alert('Erreur lors de la création de la commande: ' + result.error);
+      }
+    });
   };
+
+  // Validation for steps
+  const isStep1Valid = orderData.firstName && orderData.lastName && orderData.phone;
+  const isStep2Valid = orderData.wilaya;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100">
@@ -104,11 +181,10 @@ export default function OrderPage() {
             <div className="flex items-center space-x-2">
               <TreePine className="h-6 w-6 sm:h-8 sm:w-8 text-blue-600" />
               <span className="text-lg sm:text-xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-                BoisCraft
+                DariMeuble
               </span>
             </div>
 
-            {/* Mobile Menu Button */}
             <div className="sm:hidden">
               <Button
                 variant="ghost"
@@ -166,7 +242,7 @@ export default function OrderPage() {
                 <CardContent className="space-y-6">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <Label htmlFor="firstName" className="text-slate-700">Prénom</Label>
+                      <Label htmlFor="firstName" className="text-slate-700">Prénom *</Label>
                       <Input
                         id="firstName"
                         value={orderData.firstName}
@@ -176,7 +252,7 @@ export default function OrderPage() {
                       />
                     </div>
                     <div>
-                      <Label htmlFor="lastName" className="text-slate-700">Nom</Label>
+                      <Label htmlFor="lastName" className="text-slate-700">Nom *</Label>
                       <Input
                         id="lastName"
                         value={orderData.lastName}
@@ -188,22 +264,7 @@ export default function OrderPage() {
                   </div>
                   
                   <div>
-                    <Label htmlFor="email" className="text-slate-700">Email</Label>
-                    <div className="relative">
-                      <Mail className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
-                      <Input
-                        id="email"
-                        type="email"
-                        value={orderData.email}
-                        onChange={(e) => handleInputChange('email', e.target.value)}
-                        className="pl-10 border-slate-300 focus:border-blue-600"
-                        required
-                      />
-                    </div>
-                  </div>
-                  
-                  <div>
-                    <Label htmlFor="phone" className="text-slate-700">Téléphone</Label>
+                    <Label htmlFor="phone" className="text-slate-700">Téléphone *</Label>
                     <div className="relative">
                       <Phone className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
                       <Input
@@ -211,6 +272,7 @@ export default function OrderPage() {
                         value={orderData.phone}
                         onChange={(e) => handleInputChange('phone', e.target.value)}
                         className="pl-10 border-slate-300 focus:border-blue-600"
+                        placeholder="0555 123 456"
                         required
                       />
                     </div>
@@ -230,166 +292,26 @@ export default function OrderPage() {
                 </CardHeader>
                 <CardContent className="space-y-6">
                   <div>
-                    <Label htmlFor="address" className="text-slate-700">Adresse</Label>
-                    <Input
-                      id="address"
-                      value={orderData.address}
-                      onChange={(e) => handleInputChange('address', e.target.value)}
-                      className="border-slate-300 focus:border-blue-600"
-                      required
-                    />
-                  </div>
-                  
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <Label htmlFor="city" className="text-slate-700">Ville</Label>
-                      <Input
-                        id="city"
-                        value={orderData.city}
-                        onChange={(e) => handleInputChange('city', e.target.value)}
-                        className="border-slate-300 focus:border-blue-600"
-                        required
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="postalCode" className="text-slate-700">Code Postal</Label>
-                      <Input
-                        id="postalCode"
-                        value={orderData.postalCode}
-                        onChange={(e) => handleInputChange('postalCode', e.target.value)}
-                        className="border-slate-300 focus:border-blue-600"
-                        required
-                      />
-                    </div>
-                  </div>
-                  
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <Label htmlFor="deliveryDate" className="text-slate-700">Date de Livraison Souhaitée</Label>
-                      <div className="relative">
-                        <Calendar className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
-                        <Input
-                          id="deliveryDate"
-                          type="date"
-                          value={orderData.deliveryDate}
-                          onChange={(e) => handleInputChange('deliveryDate', e.target.value)}
-                          className="pl-10 border-slate-300 focus:border-blue-600"
-                        />
-                      </div>
-                    </div>
-                    <div>
-                      <Label htmlFor="deliveryTime" className="text-slate-700">Créneau Horaire</Label>
-                      <Select value={orderData.deliveryTime} onValueChange={(value) => handleInputChange('deliveryTime', value)}>
-                        <SelectTrigger className="border-slate-300 focus:border-blue-600">
-                          <SelectValue placeholder="Choisir un créneau" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="morning">Matin (8h-12h)</SelectItem>
-                          <SelectItem value="afternoon">Après-midi (14h-18h)</SelectItem>
-                          <SelectItem value="evening">Soirée (18h-20h)</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                  
-                  <div>
-                    <Label htmlFor="specialInstructions" className="text-slate-700">Instructions Spéciales</Label>
-                    <Textarea
-                      id="specialInstructions"
-                      value={orderData.specialInstructions}
-                      onChange={(e) => handleInputChange('specialInstructions', e.target.value)}
-                      className="border-slate-300 focus:border-blue-600"
-                      placeholder="Étage, code d'accès, instructions particulières..."
-                      rows={3}
-                    />
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Step 3: Payment */}
-            {currentStep === 3 && (
-              <Card className="border-slate-200 shadow-lg">
-                <CardHeader>
-                  <CardTitle className="flex items-center text-slate-800">
-                    <CreditCard className="h-5 w-5 mr-2 text-blue-600" />
-                    Informations de Paiement
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-6">
-                  <div>
-                    <Label className="text-slate-700">Méthode de Paiement</Label>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-2">
-                      <button
-                        onClick={() => handleInputChange('paymentMethod', 'card')}
-                        className={`p-4 rounded-lg border-2 transition-all duration-300 ${
-                          orderData.paymentMethod === 'card'
-                            ? 'border-blue-600 bg-blue-50'
-                            : 'border-slate-200 hover:border-slate-300'
-                        }`}
-                      >
-                        <CreditCard className="h-6 w-6 mx-auto mb-2 text-blue-600" />
-                        <div className="text-sm font-medium">Carte Bancaire</div>
-                      </button>
-                      <button
-                        onClick={() => handleInputChange('paymentMethod', 'transfer')}
-                        className={`p-4 rounded-lg border-2 transition-all duration-300 ${
-                          orderData.paymentMethod === 'transfer'
-                            ? 'border-blue-600 bg-blue-50'
-                            : 'border-slate-200 hover:border-slate-300'
-                        }`}
-                      >
-                        <Package className="h-6 w-6 mx-auto mb-2 text-blue-600" />
-                        <div className="text-sm font-medium">Virement</div>
-                      </button>
-                    </div>
+                    <Label htmlFor="wilaya" className="text-slate-700">Wilaya *</Label>
+                    <Select value={orderData.wilaya} onValueChange={(value) => handleInputChange('wilaya', value)}>
+                      <SelectTrigger className="border-slate-300 focus:border-blue-600">
+                        <SelectValue placeholder="Choisir votre wilaya" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {wilayaOptions.map((wilaya) => (
+                          <SelectItem key={wilaya.value} value={wilaya.value}>
+                            {wilaya.label} {wilaya.price > 0 ? `(+${wilaya.price} DA)` : '(Gratuit)'}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
 
-                  {orderData.paymentMethod === 'card' && (
-                    <div className="space-y-4">
-                      <div>
-                        <Label htmlFor="cardNumber" className="text-slate-700">Numéro de Carte</Label>
-                        <Input
-                          id="cardNumber"
-                          value={orderData.cardNumber}
-                          onChange={(e) => handleInputChange('cardNumber', e.target.value)}
-                          className="border-slate-300 focus:border-blue-600"
-                          placeholder="1234 5678 9012 3456"
-                        />
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <Label htmlFor="expiryDate" className="text-slate-700">Date d'Expiration</Label>
-                          <Input
-                            id="expiryDate"
-                            value={orderData.expiryDate}
-                            onChange={(e) => handleInputChange('expiryDate', e.target.value)}
-                            className="border-slate-300 focus:border-blue-600"
-                            placeholder="MM/AA"
-                          />
-                        </div>
-                        <div>
-                          <Label htmlFor="cvv" className="text-slate-700">CVV</Label>
-                          <Input
-                            id="cvv"
-                            value={orderData.cvv}
-                            onChange={(e) => handleInputChange('cvv', e.target.value)}
-                            className="border-slate-300 focus:border-blue-600"
-                            placeholder="123"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {orderData.paymentMethod === 'transfer' && (
+                  {selectedWilaya && (
                     <div className="bg-blue-50 rounded-lg p-4">
-                      <h4 className="font-medium text-slate-800 mb-2">Informations de Virement</h4>
-                      <div className="space-y-1 text-sm text-slate-600">
-                        <p><strong>IBAN:</strong> FR76 1234 5678 9012 3456 7890 123</p>
-                        <p><strong>BIC:</strong> BOUSFRPPXXX</p>
-                        <p><strong>Bénéficiaire:</strong> BoisCraft SARL</p>
-                        <p><strong>Référence:</strong> Commande #{Math.random().toString(36).substr(2, 9).toUpperCase()}</p>
+                      <div className="flex items-center text-sm text-blue-800">
+                        <Truck className="h-4 w-4 mr-2" />
+                        Livraison à {selectedWilaya.label}: {selectedWilaya.price === 0 ? 'Gratuite' : `${selectedWilaya.price} DA`}
                       </div>
                     </div>
                   )}
@@ -397,8 +319,8 @@ export default function OrderPage() {
               </Card>
             )}
 
-            {/* Step 4: Confirmation */}
-            {currentStep === 4 && (
+            {/* Step 3: Confirmation */}
+            {currentStep === 3 && (
               <Card className="border-slate-200 shadow-lg">
                 <CardHeader>
                   <CardTitle className="flex items-center text-slate-800">
@@ -412,9 +334,15 @@ export default function OrderPage() {
                     <h3 className="text-xl font-semibold text-green-800 mb-2">
                       Commande Confirmée !
                     </h3>
-                    <p className="text-green-700">
-                      Votre commande a été enregistrée avec succès. Vous recevrez un email de confirmation dans quelques minutes.
+                    <p className="text-green-700 mb-4">
+                      Votre commande a été enregistrée avec succès.
                     </p>
+                    {orderResult && (
+                      <div className="text-sm text-green-600">
+                        <p>Numéro de commande: <strong>{orderResult.orderNumber}</strong></p>
+                        <p>Code de suivi: <strong>{orderResult.trackingCode}</strong></p>
+                      </div>
+                    )}
                   </div>
 
                   <div className="space-y-4">
@@ -425,52 +353,61 @@ export default function OrderPage() {
                         <span>{orderData.firstName} {orderData.lastName}</span>
                       </div>
                       <div className="flex justify-between">
-                        <span>Email:</span>
-                        <span>{orderData.email}</span>
+                        <span>Téléphone:</span>
+                        <span>{orderData.phone}</span>
                       </div>
                       <div className="flex justify-between">
-                        <span>Adresse:</span>
-                        <span>{orderData.address}, {orderData.city}</span>
+                        <span>Wilaya:</span>
+                        <span>{selectedWilaya?.label}</span>
                       </div>
                       <div className="flex justify-between">
-                        <span>Livraison:</span>
-                        <span>{orderData.deliveryDate} - {orderData.deliveryTime}</span>
+                        <span>Articles:</span>
+                        <span>{products.reduce((sum, p) => sum + p.quantity, 0)} article(s)</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Total:</span>
+                        <span className="font-semibold">{finalTotal / 100} DA</span>
                       </div>
                     </div>
                   </div>
 
                   <Button 
-                    onClick={() => window.location.href = '/'}
+                    onClick={() => window.location.href = '/products'}
                     className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white py-3"
                   >
-                    Retour à l'Accueil
+                    Continuer vos Achats
                   </Button>
                 </CardContent>
               </Card>
             )}
 
             {/* Navigation Buttons */}
-            {currentStep < 4 && (
+            {currentStep < 3 && (
               <div className="flex flex-col sm:flex-row justify-between mt-8 gap-4">
                 <Button
                   variant="outline"
                   onClick={prevStep}
-                  disabled={currentStep === 1}
+                  disabled={currentStep === 1 || isPending}
                   className="border-slate-300 text-slate-700 order-2 sm:order-1"
                 >
                   Précédent
                 </Button>
                 <Button
-                  onClick={currentStep === 3 ? submitOrder : nextStep}
+                  onClick={currentStep === 2 ? submitOrder : nextStep}
+                  disabled={
+                    isPending || 
+                    (currentStep === 1 && !isStep1Valid) || 
+                    (currentStep === 2 && !isStep2Valid)
+                  }
                   className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white order-1 sm:order-2"
                 >
-                  {currentStep === 3 ? 'Confirmer la Commande' : 'Suivant'}
+                  {isPending ? 'Traitement...' : currentStep === 2 ? 'Confirmer la Commande' : 'Suivant'}
                 </Button>
               </div>
             )}
           </div>
 
-          {/* Order Summary */}
+          {/* Updated Order Summary */}
           <div className="lg:col-span-1">
             <Card className="border-slate-200 shadow-lg sticky top-8">
               <CardHeader>
@@ -480,30 +417,61 @@ export default function OrderPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="flex items-center space-x-3">
-                  <div className="w-16 h-16 bg-slate-200 rounded-lg"></div>
-                  <div>
-                    <h4 className="font-medium text-slate-800">Table en Chêne Rustique</h4>
-                    <p className="text-sm text-slate-600">
-                      {orderData.dimensions.length}×{orderData.dimensions.width}×{orderData.dimensions.height} cm
-                    </p>
-                    <p className="text-sm text-slate-600">Finition: {orderData.finish}</p>
-                  </div>
+                {/* Display all products */}
+                
+                <div className="space-y-3">
+                  {products.map((product, index) => (
+                    <div key={index} className="flex items-center space-x-3 pb-3 border-b border-slate-100 last:border-b-0">
+                      <div className="w-12 h-12 bg-slate-200 rounded-lg flex-shrink-0"></div>
+                      <div className="flex-1">
+                        <h4 className="font-medium text-slate-800 text-sm">
+                          {isCartOrder ? `Produit ${index + 1}` : 'Table en Chêne Rustique'}
+                        </h4>
+                        <p className="text-xs text-slate-600">
+                          Quantité: {product.quantity}
+                        </p>
+                        <p className="text-xs text-slate-600">
+                          Finition: {product.finish}
+                        </p>
+                        <div className="text-sm font-medium text-slate-800 mt-1">
+                          {new Intl.NumberFormat('fr-DZ', {
+                            style: 'decimal',
+                            minimumFractionDigits: 0,
+                            maximumFractionDigits: 0,
+                          }).format(product.price * product.quantity)} DA
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-
+                
                 <div className="space-y-2 pt-4 border-t border-slate-200">
                   <div className="flex justify-between">
-                    <span className="text-slate-600">Produit (×{orderData.quantity})</span>
-                    <span className="text-slate-800">{productPrice * orderData.quantity}€</span>
+                    <span className="text-slate-600">
+                      Produits ({products.reduce((sum, p) => sum + p.quantity, 0)})
+                    </span>
+                    <span className="text-slate-800">
+                      {new Intl.NumberFormat('fr-DZ', {
+                        style: 'decimal',
+                        minimumFractionDigits: 0,
+                        maximumFractionDigits: 0,
+                      }).format(totalPrice)} DA
+                    </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-600">Livraison</span>
-                    <span className="text-slate-800">{deliveryPrice}€</span>
+                    <span className="text-slate-800">
+                      {deliveryPrice === 0 ? 'Gratuit' : `${deliveryPrice} DA`}
+                    </span>
                   </div>
                   <div className="flex justify-between font-semibold text-lg pt-2 border-t border-slate-200">
                     <span className="text-slate-800">Total</span>
                     <span className="bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-                      {totalPrice}€
+                      {new Intl.NumberFormat('fr-DZ', {
+                        style: 'decimal',
+                        minimumFractionDigits: 0,
+                        maximumFractionDigits: 0,
+                      }).format(finalTotal)} DA
                     </span>
                   </div>
                 </div>
@@ -511,7 +479,7 @@ export default function OrderPage() {
                 <div className="bg-blue-50 rounded-lg p-3 mt-4">
                   <div className="flex items-center text-sm text-blue-800">
                     <Truck className="h-4 w-4 mr-2" />
-                    Livraison estimée: 2-3 semaines
+                    Paiement à la livraison
                   </div>
                 </div>
               </CardContent>
@@ -520,5 +488,20 @@ export default function OrderPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function OrderPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-4 text-slate-600">Chargement de votre commande...</p>
+        </div>
+      </div>
+    }>
+      <OrderPageContent />
+    </Suspense>
   );
 }

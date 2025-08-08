@@ -1,7 +1,8 @@
 // Create a new file: ProductPageClient.tsx
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect , useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -9,6 +10,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Slider } from '@/components/ui/slider';
+import { Textarea } from '@/components/ui/textarea';
+import { getProduct, addToCartAction , addReview} from '../../../lib/action/product-actions';
 import { 
   Star, 
   ShoppingCart, 
@@ -30,46 +33,6 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
-
-const productData = {
-  1: {
-    id: 1,
-    name: { fr: 'Table à Manger en Chêne Rustique', ar: 'طاولة طعام من خشب البلوط الريفي', en: 'Rustic Oak Dining Table' },
-    price: 89900,
-    originalPrice: 129900,
-    images: [
-      'https://images.pexels.com/photos/1350789/pexels-photo-1350789.jpeg?auto=compress&cs=tinysrgb&w=800&h=600',
-      'https://images.pexels.com/photos/1571460/pexels-photo-1571460.jpeg?auto=compress&cs=tinysrgb&w=800&h=600',
-      'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQTyVyigG2TjOSc6IqHDond5puIsD7ncrcOnw&s'
-    ],
-    rating: 4.8,
-    reviews: 124,
-    category: 'tables',
-    material: { fr: 'Chêne Massif', ar: 'خشب البلوط الصلب', en: 'Solid Oak' },
-    description: {
-      fr: 'Cette magnifique table à manger en chêne rustique apportera une touche d\'élégance naturelle à votre salle à manger. Fabriquée à partir de chêne massif de haute qualité, elle est conçue pour durer des générations.',
-      ar: 'ستضفي طاولة الطعام الريفية الرائعة هذه من خشب البلوط لمسة من الأناقة الطبيعية على غرفة الطعام الخاصة بك. مصنوعة من خشب البلوط الصلب عالي الجودة، وهي مصممة لتدوم لأجيال.',
-      en: 'This beautiful rustic oak dining table will bring a touch of natural elegance to your dining room. Made from high-quality solid oak, it is designed to last for generations.'
-    },
-    features: {
-      fr: ['Chêne massif 100%', 'Finition naturelle', 'Résistant aux rayures', 'Assemblage traditionnel'],
-      ar: ['خشب البلوط الصلب 100%', 'تشطيب طبيعي', 'مقاوم للخدوش', 'تجميع تقليدي'],
-      en: ['100% Solid Oak', 'Natural Finish', 'Scratch Resistant', 'Traditional Assembly']
-    },
-    dimensions: {
-      length: { min: 120, max: 300, default: 180 },
-      width: { min: 70, max: 120, default: 90 },
-      height: { min: 70, max: 80, default: 75 }
-    },
-    finishes: [
-      { id: 'natural', name: { fr: 'Naturel', ar: 'طبيعي', en: 'Natural' }, color: '#D2B48C' },
-      { id: 'dark', name: { fr: 'Foncé', ar: 'داكن', en: 'Dark' }, color: '#8B4513' },
-      { id: 'light', name: { fr: 'Clair', ar: 'فاتح', en: 'Light' }, color: '#F5DEB3' }
-    ],
-    inStock: true,
-    deliveryTime: { fr: '2-3 semaines', ar: '2-3 أسابيع', en: '2-3 weeks' }
-  }
-};
 
 const translations = {
   fr: {
@@ -97,7 +60,14 @@ const translations = {
     totalPrice: 'Prix Total',
     customization: 'Personnalisation',
     material: 'Matériau',
-    da: 'DA'
+    da: 'DA',
+    writeReview: 'Écrire un Avis',
+    submitReview: 'Soumettre l\'Avis',
+    yourName: 'Votre Nom',
+    yourEmail: 'Votre Email',
+    shareExperience: 'Partagez votre expérience avec ce produit...',
+    submitting: 'Soumission...',
+    cancel: 'Annuler'
   },
   ar: {
     backToProducts: 'العودة للمنتجات',
@@ -124,7 +94,14 @@ const translations = {
     totalPrice: 'السعر الإجمالي',
     customization: 'التخصيص',
     material: 'المادة',
-    da: 'دج'
+    da: 'دج',
+    writeReview: 'كتابة مراجعة',
+    submitReview: 'إرسال المراجعة',
+    yourName: 'اسمك',
+    yourEmail: 'بريدك الإلكتروني',
+    shareExperience: 'شاركنا تجربتك مع هذا المنتج...',
+    submitting: 'جارٍ الإرسال...',
+    cancel: 'إلغاء'
   },
   en: {
     backToProducts: 'Back to Products',
@@ -151,12 +128,22 @@ const translations = {
     totalPrice: 'Total Price',
     customization: 'Customization',
     material: 'Material',
-    da: 'DA'
+    da: 'DA',
+    writeReview: 'Write Review',
+    submitReview: 'Submit Review',
+    yourName: 'Your Name',
+    yourEmail: 'Your Email',
+    shareExperience: 'Share your experience with this product...',
+    submitting: 'Submitting...',
+    cancel: 'Cancel'
   }
 };
 
-export default function ProductPageClient({ params }: { params: { id: string } }) {
-  const productId = params.id;
+interface typeData { id: string }
+
+export default function ProductPageClient({ id } : typeData) {
+  const productId = id;
+  const router = useRouter();
   const [language, setLanguage] = useState<'fr' | 'ar' | 'en'>('fr');
   const [selectedImage, setSelectedImage] = useState(0);
   const [quantity, setQuantity] = useState(1);
@@ -169,13 +156,186 @@ export default function ProductPageClient({ params }: { params: { id: string } }
   const [activeTab, setActiveTab] = useState('description');
   const [cart, setCart] = useState<any[]>([]);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  
+  // ADD THESE NEW STATE VARIABLES
+  const [product, setProduct] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+  const [cartLoading, setCartLoading] = useState(false);
 
-  const product = productData[productId as keyof typeof productData];
+  const [showReviewForm, setShowReviewForm] = useState(false);
+  const [reviewData, setReviewData] = useState({
+    rating: 5,
+    comment: '',
+    customerName: '',
+    customerEmail: ''
+  });
+  const [reviewSubmitting, setReviewSubmitting] = useState(false);
+
+
+  // const product = productData[productId as keyof typeof productData];
   const t = translations[language];
   const isRTL = language === 'ar';
+  
+  const submitReview = async () => {
+    setReviewSubmitting(true);
+    try {
+      const result = await addReview({
+        productId: product.id,
+        rating: reviewData.rating,
+        comment: reviewData.comment,
+        customerName: reviewData.customerName,
+        customerEmail: reviewData.customerEmail
+      });
 
-  if (!product) {
-    return <div>Product not found</div>;
+      if (result.success) {
+        alert('Review submitted successfully!');
+        setShowReviewForm(false);
+        setReviewData({ rating: 5, comment: '', customerName: '', customerEmail: '' });
+        // Optionally refresh product data
+        window.location.reload();
+      } else {
+        alert('Failed to submit review');
+      }
+    } catch (error) {
+      alert('Error submitting review');
+    }
+    setReviewSubmitting(false);
+  };
+
+  useEffect(() => {
+    const fetchProduct = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const productData = await getProduct(productId);
+        
+        if (productData) {
+          // Transform the data to match your existing structure
+          const transformedProduct = {
+            id: productData.id,
+            name: {
+              fr: productData.name,
+              ar: productData.nameAr,
+              en: productData.nameEn
+            },
+            price: productData.price,
+            originalPrice: productData.originalPrice || productData.price * 1.3,
+            images: JSON.parse(productData.images || '[]'),
+            rating: productData.rating,
+            reviews: productData.reviewCount,
+            category: productData.categoryId,
+            material: {
+              fr: productData.material,
+              ar: productData.materialAr,
+              en: productData.materialEn
+            },
+            description: {
+              fr: productData.description,
+              ar: productData.descriptionAr,
+              en: productData.descriptionEn
+            },
+            features: {
+              // You might want to add a features field to your schema
+              // For now, using default features
+              fr: ['Matériau de qualité', 'Finition soignée', 'Résistant', 'Fait main'],
+              ar: ['مواد عالية الجودة', 'تشطيب متقن', 'مقاوم', 'صنع يدوي'],
+              en: ['Quality Material', 'Fine Finish', 'Resistant', 'Handmade']
+            },
+            dimensions: (() => {
+              try {
+                return productData.dimensions ? JSON.parse(productData.dimensions) : {
+                  length: { min: 120, max: 300, default: 180 },
+                  width: { min: 70, max: 120, default: 90 },
+                  height: { min: 70, max: 80, default: 75 }
+                };
+              } catch (error) {
+                console.warn('Error parsing dimensions:', error);
+                return {
+                  length: { min: 120, max: 300, default: 180 },
+                  width: { min: 70, max: 120, default: 90 },
+                  height: { min: 70, max: 80, default: 75 }
+                };
+              }
+            })(),
+            finishes: productData.customizations?.filter((c: any) => c.type === 'finish').map((f: any) => {
+            try {
+              const value = f.value ? JSON.parse(f.value) : { code: 'natural', color: '#D2B48C' };
+              return {
+                id: value.code || 'natural',
+                name: {
+                  fr: f.name,
+                  ar: f.nameAr,
+                  en: f.nameEn
+                },
+                color: value.color || '#D2B48C'
+              };
+            } catch (error) {
+              console.warn('Error parsing finish value:', error);
+              return {
+                id: 'natural',
+                name: {
+                  fr: f.name || 'Natural',
+                  ar: f.nameAr || 'طبيعي',
+                  en: f.nameEn || 'Natural'
+                },
+                color: '#D2B48C'
+              };
+            }
+          }) || [
+            { id: 'natural', name: { fr: 'Naturel', ar: 'طبيعي', en: 'Natural' }, color: '#D2B48C' },
+            { id: 'dark', name: { fr: 'Foncé', ar: 'داكن', en: 'Dark' }, color: '#8B4513' },
+            { id: 'light', name: { fr: 'Clair', ar: 'فاتح', en: 'Light' }, color: '#F5DEB3' }
+          ],
+            inStock: productData.stock > 0,
+            deliveryTime: { fr: '2-3 semaines', ar: '2-3 أسابيع', en: '2-3 weeks' },
+            reviewsData: productData.reviews || []
+          };
+          
+          setProduct(transformedProduct);
+          
+          // Set initial dimensions from product data
+          const dims = transformedProduct.dimensions;
+          setDimensions({
+            length: dims.length?.default || 180,
+            width: dims.width?.default || 90,
+            height: dims.height?.default || 75
+          });
+        } else {
+          setError('Product not found');
+        }
+      } catch (err) {
+        setError('Failed to load product');
+        console.error('Error fetching product:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchProduct();
+  }, [productId]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-slate-600">Loading product...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !product) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-red-600 mb-4">{error || `Product not found: ${productId}`}</p>
+          <Button onClick={() => window.location.reload()}>Try Again</Button>
+        </div>
+      </div>
+    );
   }
 
   const calculatePrice = () => {
@@ -195,22 +355,62 @@ export default function ProductPageClient({ params }: { params: { id: string } }
     }).format(price);
   };
 
-  const addToCart = () => {
+  const addToCart = (productData: any) => {
+    console.log('🛒 Adding to cart - Product data:', productData);
+    console.log('🛒 Adding to cart - Quantity:', quantity);
+    console.log('🛒 Adding to cart - Selected finish:', selectedFinish);
+    console.log('🛒 Adding to cart - Dimensions:', dimensions);
+    
     const cartItem = {
-      ...product,
-      quantity,
-      selectedFinish,
-      dimensions,
-      customPrice: calculatePrice(),
-      id: Date.now()
+      id: productData.id,
+      quantity: quantity,
+      finish: selectedFinish,
+      dimensions: dimensions,
+      price: calculatePrice(),
+      addedAt: new Date().toISOString()
     };
-    setCart(prev => [...prev, cartItem]);
-    alert(`${product.name[language]} ajouté au panier!`);
+
+    console.log('🛒 Cart item to add:', cartItem);
+
+    // Get existing cart from localStorage
+    const existingCart = JSON.parse(localStorage.getItem('cart') || '[]');
+    console.log('🛒 Existing cart before adding:', existingCart);
+
+    // Check if item already exists
+    const existingItemIndex = existingCart.findIndex((item: any) => 
+      item.id === productData.id && 
+      item.finish === selectedFinish &&
+      JSON.stringify(item.dimensions) === JSON.stringify(dimensions)
+    );
+
+    console.log('🛒 Existing item index:', existingItemIndex);
+
+    if (existingItemIndex > -1) {
+      // Update quantity if item exists
+      existingCart[existingItemIndex].quantity += quantity;
+      console.log('🛒 Updated existing item quantity');
+    } else {
+      // Add new item
+      existingCart.push(cartItem);
+      console.log('🛒 Added new item to cart');
+    }
+
+    // Save back to localStorage
+    localStorage.setItem('cart', JSON.stringify(existingCart));
+    console.log('🛒 Final cart saved to localStorage:', existingCart);
+
+    // Verify it was saved
+    const savedCart = localStorage.getItem('cart');
+    console.log('🛒 Verification - cart in localStorage:', savedCart);
+
+    // Optional: Show success message
+    alert(`Product added to cart! Cart now has ${existingCart.length} item(s)`);
   };
 
   const buyNow = () => {
-    window.location.href = `/order?product=${product.id}&quantity=${quantity}&finish=${selectedFinish}&dimensions=${JSON.stringify(dimensions)}`;
-  };
+  const finalPrice = calculatePrice(); // Get the calculated price with customizations
+  window.location.href = `/order?product=${product.id}&quantity=${quantity}&finish=${selectedFinish}&dimensions=${JSON.stringify(dimensions)}&price=${finalPrice}`;
+};
 
   return (
   <div className={`min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 ${isRTL ? 'rtl' : 'ltr'}`}>
@@ -221,7 +421,7 @@ export default function ProductPageClient({ params }: { params: { id: string } }
           {/* Back Button - Hidden on mobile, shown on larger screens */}
           <div className="hidden sm:flex items-center space-x-2 text-slate-700 hover:text-blue-600 transition-colors cursor-pointer">
             <ArrowLeft className="h-5 w-5" />
-            <span className="text-sm lg:text-base">{t.backToProducts}</span>
+            <span className="text-sm lg:text-base"><Link href="/products">{t.backToProducts}</Link></span>
           </div>
           
           {/* Mobile Menu Button */}
@@ -238,7 +438,7 @@ export default function ProductPageClient({ params }: { params: { id: string } }
               <TreePine className="h-5 w-5 sm:h-6 sm:w-6 text-white" />
             </div>
             <span className="text-lg sm:text-xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-              BoisCraft
+              DariMeuble
             </span>
           </div>
 
@@ -415,121 +615,104 @@ export default function ProductPageClient({ params }: { params: { id: string } }
 
           {/* Customization */}
           <Card className="border-slate-200 shadow-lg">
-            <CardContent className="p-4 sm:p-6">
-              <h3 className="text-lg sm:text-xl font-semibold text-slate-800 mb-4 sm:mb-6 flex items-center">
-                <Ruler className="h-4 w-4 sm:h-5 sm:w-5 mr-2 text-blue-600" />
+            <CardContent className="p-3 sm:p-4">
+              <h3 className="text-base sm:text-lg font-semibold text-slate-800 mb-3 flex items-center">
+                <Ruler className="h-4 w-4 mr-2 text-blue-600" />
                 {t.customizeProduct}
               </h3>
 
-              <div className="space-y-4 sm:space-y-6">
-                {/* Dimensions */}
-                <div>
-                  <Label className="text-sm sm:text-base font-medium text-slate-700 mb-3 sm:mb-4 block">
-                    {t.dimensions}
-                  </Label>
-                  <div className="space-y-4 sm:space-y-0 sm:grid sm:grid-cols-3 sm:gap-4">
-                    <div className="space-y-2">
-                      <Label className="text-xs sm:text-sm text-slate-600">{t.length} ({t.cm})</Label>
-                      <Slider
-                        value={[dimensions.length]}
-                        onValueChange={(value) => setDimensions({...dimensions, length: value[0]})}
-                        min={120}
-                        max={300}
-                        step={10}
-                        className="mt-2"
-                      />
-                      <div className="text-center text-xs sm:text-sm text-slate-600">
-                        {dimensions.length} {t.cm}
-                      </div>
+              <div className="space-y-3">
+                {/* Dimensions - Compact */}
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <Label className="text-xs text-slate-600">{t.length}</Label>
+                    <div className="text-center text-xs text-slate-800 font-medium mt-1">
+                      {dimensions.length} {t.cm}
                     </div>
-                    <div className="space-y-2">
-                      <Label className="text-xs sm:text-sm text-slate-600">{t.width} ({t.cm})</Label>
-                      <Slider
-                        value={[dimensions.width]}
-                        onValueChange={(value) => setDimensions({...dimensions, width: value[0]})}
-                        min={70}
-                        max={120}
-                        step={5}
-                        className="mt-2"
-                      />
-                      <div className="text-center text-xs sm:text-sm text-slate-600">
-                        {dimensions.width} {t.cm}
-                      </div>
+                    <Slider
+                      value={[dimensions.length]}
+                      onValueChange={(value) => setDimensions({...dimensions, length: value[0]})}
+                      min={product.dimensions.length?.min || 120}
+                      max={product.dimensions.length?.max || 300}
+                      step={10}
+                      className="mt-1"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs text-slate-600">{t.width}</Label>
+                    <div className="text-center text-xs text-slate-800 font-medium mt-1">
+                      {dimensions.width} {t.cm}
                     </div>
-                    <div className="space-y-2">
-                      <Label className="text-xs sm:text-sm text-slate-600">{t.height} ({t.cm})</Label>
-                      <Slider
-                        value={[dimensions.height]}
-                        onValueChange={(value) => setDimensions({...dimensions, height: value[0]})}
-                        min={70}
-                        max={80}
-                        step={1}
-                        className="mt-2"
-                      />
-                      <div className="text-center text-xs sm:text-sm text-slate-600">
-                        {dimensions.height} {t.cm}
-                      </div>
+                    <Slider
+                      value={[dimensions.width]}
+                      onValueChange={(value) => setDimensions({...dimensions, width: value[0]})}
+                      min={product.dimensions.width?.min || 70}
+                      max={product.dimensions.width?.max || 120}
+                      step={5}
+                      className="mt-1"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs text-slate-600">{t.height}</Label>
+                    <div className="text-center text-xs text-slate-800 font-medium mt-1">
+                      {dimensions.height} {t.cm}
                     </div>
+                    <Slider
+                      value={[dimensions.height]}
+                      onValueChange={(value) => setDimensions({...dimensions, height: value[0]})}
+                      min={product.dimensions.height?.min || 70}
+                      max={product.dimensions.height?.max || 80}
+                      step={1}
+                      className="mt-1"
+                    />
                   </div>
                 </div>
 
-                {/* Finish */}
+                {/* Finish - Compact */}
                 <div>
-                  <Label className="text-sm sm:text-base font-medium text-slate-700 mb-3 sm:mb-4 block flex items-center">
-                    <Palette className="h-4 w-4 mr-2 text-blue-600" />
+                  <Label className="text-xs text-slate-600 mb-2 block flex items-center">
+                    <Palette className="h-3 w-3 mr-1 text-blue-600" />
                     {t.finish}
                   </Label>
-                  <div className="grid grid-cols-3 gap-2 sm:gap-3">
-                    {[
-                      { id: 'natural', name: { fr: 'Naturel', ar: 'طبيعي', en: 'Natural' }, color: '#D2B48C' },
-                      { id: 'dark', name: { fr: 'Foncé', ar: 'داكن', en: 'Dark' }, color: '#8B4513' },
-                      { id: 'light', name: { fr: 'Clair', ar: 'فاتح', en: 'Light' }, color: '#F5DEB3' }
-                    ].map((finish) => (
+                  <div className="flex gap-2">
+                    {product.finishes.map((finish: any) => (
                       <button
                         key={finish.id}
                         onClick={() => setSelectedFinish(finish.id)}
-                        className={`p-2 sm:p-3 rounded-lg border-2 transition-all duration-300 ${
-                          selectedFinish === finish.id
-                            ? 'border-blue-600 bg-blue-50'
-                            : 'border-slate-200 hover:border-slate-300'
+                        className={`flex-1 p-2 rounded-lg border-2 transition-all ${
+                          selectedFinish === finish.id ? 'border-blue-600 bg-blue-50' : 'border-slate-200'
                         }`}
                       >
                         <div
-                          className="w-6 h-6 sm:w-8 sm:h-8 rounded-full mx-auto mb-1 sm:mb-2"
+                          className="w-4 h-4 rounded-full mx-auto mb-1"
                           style={{ backgroundColor: finish.color }}
                         />
-                        <div className="text-xs sm:text-sm font-medium text-slate-700">
-                          {finish.name[language]}
-                        </div>
+                        <div className="text-xs text-slate-700">{finish.name[language]}</div>
                       </button>
                     ))}
                   </div>
                 </div>
-
-                {/* Quantity */}
-                <div>
-                  <Label className="text-sm sm:text-base font-medium text-slate-700 mb-3 sm:mb-4 block">
-                    {t.quantity}
-                  </Label>
-                  <div className="flex items-center space-x-3">
+                  
+                {/* Quantity - Compact */}
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs text-slate-600">{t.quantity}</Label>
+                  <div className="flex items-center space-x-2">
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => setQuantity(Math.max(1, quantity - 1))}
-                      className="border-slate-300 w-8 h-8 p-0"
+                      className="w-6 h-6 p-0"
                     >
-                      <Minus className="h-3 w-3 sm:h-4 sm:w-4" />
+                      <Minus className="h-3 w-3" />
                     </Button>
-                    <span className="text-base sm:text-lg font-medium text-slate-800 min-w-[2rem] sm:min-w-[3rem] text-center">
-                      {quantity}
-                    </span>
+                    <span className="text-sm font-medium min-w-[2rem] text-center">{quantity}</span>
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => setQuantity(quantity + 1)}
-                      className="border-slate-300 w-8 h-8 p-0"
+                      className="w-6 h-6 p-0"
                     >
-                      <Plus className="h-3 w-3 sm:h-4 sm:w-4" />
+                      <Plus className="h-3 w-3" />
                     </Button>
                   </div>
                 </div>
@@ -547,23 +730,27 @@ export default function ProductPageClient({ params }: { params: { id: string } }
                 </span>
               </div>
             </div>
-            
-            <div className="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-4">
+
+            {/* REPLACE THIS SECTION */}
+            <div className="flex flex-col sm:flex-row gap-3">
               <Button 
                 size="lg" 
-                className="w-full sm:flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white py-3 text-sm sm:text-lg font-semibold"
-                onClick={addToCart}
+                variant="outline"
+                className="flex-1 border-blue-600 text-blue-600 hover:bg-blue-50 py-3 text-sm sm:text-lg font-semibold"
+                onClick={() => addToCart(product)}
+                disabled={!product.inStock}
               >
                 <ShoppingCart className="h-4 w-4 sm:h-5 sm:w-5 mr-2" />
                 {t.addToCart}
               </Button>
+
               <Button 
                 size="lg" 
-                variant="outline"
-                className="w-full sm:flex-1 border-2 border-blue-600 text-blue-600 hover:bg-blue-50 py-3 text-sm sm:text-lg font-semibold"
+                className="flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white py-3 text-sm sm:text-lg font-semibold"
                 onClick={buyNow}
+                disabled={!product.inStock}
               >
-                {t.buyNow}
+                {product.inStock ? t.buyNow : 'Out of Stock'}
               </Button>
             </div>
           </div>
@@ -633,26 +820,133 @@ export default function ProductPageClient({ params }: { params: { id: string } }
 
             {activeTab === 'reviews' && (
               <div>
-                <h3 className="text-lg sm:text-xl font-semibold text-slate-800 mb-4 sm:mb-6">{t.reviews}</h3>
-                <div className="space-y-4 sm:space-y-6">
-                  {[1, 2, 3].map((review) => (
-                    <div key={review} className="border-b border-slate-200 pb-4 sm:pb-6">
-                      <div className="flex items-center mb-2">
-                        <div className="flex items-center">
-                          {[...Array(5)].map((_, i) => (
-                            <Star key={i} className="h-3 w-3 sm:h-4 sm:w-4 text-yellow-400 fill-current" />
-                          ))}
+                <div className="flex justify-between items-center mb-4 sm:mb-6">
+                  <h3 className="text-lg sm:text-xl font-semibold text-slate-800">{t.reviews}</h3>
+                  <Button 
+                    onClick={() => setShowReviewForm(!showReviewForm)}
+                    className="bg-blue-600 hover:bg-blue-700 text-white text-sm"
+                  >
+                    {showReviewForm ? 'Cancel' : 'Write Review'}
+                  </Button>
+                </div>
+
+                {/* Review Form */}
+                {showReviewForm && (
+                  <Card className="mb-6 border-blue-200">
+                    <CardContent className="p-4">
+                      <h4 className="font-semibold text-slate-800 mb-4">Write a Review</h4>
+                      <div className="space-y-4">
+                        {/* Rating */}
+                        <div>
+                          <Label className="text-sm text-slate-600 mb-2 block">Rating</Label>
+                          <div className="flex space-x-1">
+                            {[1, 2, 3, 4, 5].map((star) => (
+                              <button
+                                key={star}
+                                onClick={() => setReviewData({...reviewData, rating: star})}
+                                className={`w-8 h-8 ${star <= reviewData.rating ? 'text-yellow-400' : 'text-slate-300'}`}
+                              >
+                                <Star className="w-full h-full fill-current" />
+                              </button>
+                            ))}
+                          </div>
                         </div>
-                        <span className="ml-2 font-medium text-slate-800 text-sm sm:text-base">Client {review}</span>
+                          
+                        {/* Name and Email for guest users */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div>
+                            <Label className="text-sm text-slate-600">Name</Label>
+                            <Input
+                              value={reviewData.customerName}
+                              onChange={(e) => setReviewData({...reviewData, customerName: e.target.value})}
+                              placeholder="Your name"
+                              className="mt-1"
+                            />
+                          </div>
+                          <div>
+                            <Label className="text-sm text-slate-600">Email</Label>
+                            <Input
+                              type="email"
+                              value={reviewData.customerEmail}
+                              onChange={(e) => setReviewData({...reviewData, customerEmail: e.target.value})}
+                              placeholder="Your email"
+                              className="mt-1"
+                            />
+                          </div>
+                        </div>
+                          
+                        {/* Comment */}
+                        <div>
+                          <Label className="text-sm text-slate-600">Comment (Optional)</Label>
+                          <Textarea
+                            value={reviewData.comment}
+                            onChange={(e) => setReviewData({...reviewData, comment: e.target.value})}
+                            placeholder="Share your experience with this product..."
+                            className="mt-1"
+                            rows={3}
+                          />
+                        </div>
+                          
+                        {/* Submit Button */}
+                        <Button
+                          onClick={submitReview}
+                          disabled={reviewSubmitting || !reviewData.customerName || !reviewData.customerEmail}
+                          className="bg-blue-600 hover:bg-blue-700 text-white"
+                        >
+                          {reviewSubmitting ? 'Submitting...' : 'Submit Review'}
+                        </Button>
                       </div>
-                      <p className="text-slate-600 text-sm sm:text-base">
-                        Excellent produit, très bien fini et livraison rapide. Je recommande !
-                      </p>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Existing Reviews */}
+                <div className="space-y-4 sm:space-y-6">
+                  {product.reviewsData.length > 0 ? (
+                    product.reviewsData.slice(0, 5).map((review: any, index: number) => (
+                      <div key={review.id || index} className="border-b border-slate-200 pb-4 sm:pb-6">
+                        <div className="flex items-center mb-2">
+                          <div className="flex items-center">
+                            {[...Array(5)].map((_, i) => (
+                              <Star 
+                                key={i} 
+                                className={`h-3 w-3 sm:h-4 sm:w-4 ${
+                                  i < review.rating ? 'text-yellow-400 fill-current' : 'text-slate-300'
+                                }`} 
+                              />
+                            ))}
+                          </div>
+                          <span className="ml-2 font-medium text-slate-800 text-sm sm:text-base">
+                            {review.user ? `${review.user.firstName} ${review.user.lastName.charAt(0)}.` : 'Guest User'}
+                          </span>
+                          {review.isVerified && (
+                            <Badge className="ml-2 text-xs bg-green-100 text-green-800">Verified</Badge>
+                          )}
+                          <span className="ml-auto text-xs text-slate-500">
+                            {new Date(review.createdAt).toLocaleDateString()}
+                          </span>
+                        </div>
+                        <p className="text-slate-600 text-sm sm:text-base">
+                          {review.comment || 'No comment provided'}
+                        </p>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-center py-8">
+                      <p className="text-slate-500 mb-4">No reviews yet. Be the first to review this product!</p>
+                      <Button 
+                        onClick={() => setShowReviewForm(true)}
+                        className="bg-blue-600 hover:bg-blue-700 text-white"
+                      >
+                        Write First Review
+                      </Button>
                     </div>
-                  ))}
+                  )}
                 </div>
               </div>
             )}
+
+  
 
             {activeTab === 'delivery' && (
               <div>

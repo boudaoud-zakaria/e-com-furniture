@@ -22,6 +22,9 @@ import {
   Clock,
   Star
 } from 'lucide-react';
+import { useTransition } from 'react';
+import { getCartProducts } from '../../lib/action/cart-actions';
+import Link from 'next/link';
 
 const translations = {
   fr: {
@@ -122,40 +125,83 @@ const translations = {
   }
 };
 
-// Mock cart data
-const initialCartItems = [
-  {
-    id: 1,
-    name: { fr: 'Table à Manger en Chêne Rustique', ar: 'طاولة طعام من خشب البلوط الريفي', en: 'Rustic Oak Dining Table' },
-    price: 89900,
-    image: 'https://images.pexels.com/photos/1350789/pexels-photo-1350789.jpeg?auto=compress&cs=tinysrgb&w=400&h=300',
-    quantity: 1,
-    customizations: { finish: 'Natural', dimensions: '180x90x75 cm' },
-    inStock: true,
-    rating: 4.8,
-    reviews: 124
-  },
-  {
-    id: 2,
-    name: { fr: 'Chaise de Travail Ergonomique', ar: 'كرسي عمل مريح', en: 'Ergonomic Work Chair' },
-    price: 29900,
-    image: 'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQTyVyigG2TjOSc6IqHDond5puIsD7ncrcOnw&s',
-    quantity: 2,
-    customizations: { finish: 'Dark', dimensions: '60x60x110 cm' },
-    inStock: true,
-    rating: 4.6,
-    reviews: 89
-  }
-];
 
 export default function CartPage() {
-  const [cartItems, setCartItems] = useState(initialCartItems);
+  const [cartItems, setCartItems] = useState([]);
   const [language, setLanguage] = useState('fr');
   const [promoCode, setPromoCode] = useState('');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [isPending, startTransition] = useTransition();
 
   const t = translations[language];
   const isRTL = language === 'ar';
+
+  useEffect(() => {
+    const loadCartData = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        
+        // Get cart items from localStorage
+        const cartData = JSON.parse(localStorage.getItem('cart') || '[]');
+        
+        if (cartData.length === 0) {
+          setCartItems([]);
+          setLoading(false);
+          return;
+        }
+        
+        // Extract product IDs
+        const productIds = [...new Set(cartData.map((item: any) => item.id))];
+        
+        // Fetch product details using server action
+        startTransition(async () => {
+          try {
+            const products = await getCartProducts(productIds);
+            
+            // Merge cart data with product details
+            const mergedCartItems = cartData.map((cartItem: any) => {
+              const product = products.find(p => p.id === cartItem.id);
+              
+              if (!product) return null;
+              
+              return {
+                id: cartItem.id,
+                name: product.name,
+                price: cartItem.price || product.price, // Use custom price if available
+                image: product.images[0] || '/placeholder-image.jpg',
+                quantity: cartItem.quantity,
+                customizations: {
+                  finish: cartItem.finish || 'Natural',
+                  dimensions: typeof cartItem.dimensions === 'string' 
+                    ? cartItem.dimensions 
+                    : `${cartItem.dimensions?.length || 180}x${cartItem.dimensions?.width || 90}x${cartItem.dimensions?.height || 75} cm`
+                },
+                inStock: product.inStock,
+                rating: product.rating,
+                reviews: product.reviews,
+                stock: product.stock
+              };
+            }).filter(Boolean); // Remove null items
+            
+            setCartItems(mergedCartItems);
+          } catch (err) {
+            console.error('Error loading cart:', err);
+            setError('Failed to load cart items');
+          }
+        });
+      } catch (err) {
+        console.error('Error parsing cart data:', err);
+        setError('Failed to load cart');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadCartData();
+  }, []);
 
   const formatPrice = (price) => {
     return new Intl.NumberFormat('fr-DZ', {
@@ -165,17 +211,32 @@ export default function CartPage() {
     }).format(price);
   };
 
-  const updateQuantity = (id, newQuantity) => {
+  const updateQuantity = (id: any, newQuantity: number) => {
     if (newQuantity < 1) return;
+    
+    // Update state
     setCartItems(items =>
       items.map(item =>
         item.id === id ? { ...item, quantity: newQuantity } : item
       )
     );
+    
+    // Update localStorage
+    const cartData = JSON.parse(localStorage.getItem('cart') || '[]');
+    const updatedCart = cartData.map((item: any) => 
+      item.id === id ? { ...item, quantity: newQuantity } : item
+    );
+    localStorage.setItem('cart', JSON.stringify(updatedCart));
   };
 
-  const removeItem = (id) => {
+  const removeItem = (id: any) => {
+    // Update state
     setCartItems(items => items.filter(item => item.id !== id));
+    
+    // Update localStorage
+    const cartData = JSON.parse(localStorage.getItem('cart') || '[]');
+    const updatedCart = cartData.filter((item: any) => item.id !== id);
+    localStorage.setItem('cart', JSON.stringify(updatedCart));
   };
 
   const subtotal = cartItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
@@ -184,6 +245,56 @@ export default function CartPage() {
   const total = subtotal + shipping + tax;
 
   const totalItems = cartItems.reduce((sum, item) => sum + item.quantity, 0);
+
+  const proceedToCheckout = () => {
+    if (cartItems.length === 0) return;
+    
+    // Create URL parameters for multiple products
+    const urlParams = new URLSearchParams();
+    
+    // Add cart indicator
+    urlParams.append('cart', '1');
+    
+    // Add each product's data
+    cartItems.forEach((item, index) => {
+      urlParams.append(`product_${index}`, item.id);
+      urlParams.append(`quantity_${index}`, item.quantity.toString());
+      urlParams.append(`finish_${index}`, item.customizations.finish);
+      urlParams.append(`dimensions_${index}`, item.customizations.dimensions);
+      urlParams.append(`price_${index}`, item.price.toString());
+    });
+    
+    // Add total number of products
+    urlParams.append('total_products', cartItems.length.toString());
+    
+    // Add language
+    urlParams.append('language', language);
+    
+    // Navigate to order page with all cart data
+    window.location.href = `/order?${urlParams.toString()}`;
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-slate-600">Loading cart...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-red-600 mb-4">{error}</p>
+          <Button onClick={() => window.location.reload()}>Try Again</Button>
+        </div>
+      </div>
+    );
+  }
 
   if (cartItems.length === 0) {
     return (
@@ -205,7 +316,7 @@ export default function CartPage() {
                   <TreePine className="h-5 w-5 sm:h-6 sm:w-6 text-white" />
                 </div>
                 <span className="text-lg sm:text-xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-                  BoisCraft
+                  DariMeuble
                 </span>
               </div>
 
@@ -254,7 +365,7 @@ export default function CartPage() {
               className="flex items-center space-x-2 text-slate-700 hover:text-blue-600 transition-colors p-2"
             >
               <ArrowLeft className="h-5 w-5" />
-              <span className="hidden sm:inline text-sm font-medium">{t.continueShopping}</span>
+              <span className="hidden sm:inline text-sm font-medium"><Link href="/products">{t.continueShopping}</Link></span>
             </Button>
             
             <div className="flex items-center space-x-2">
@@ -262,7 +373,7 @@ export default function CartPage() {
                 <TreePine className="h-5 w-5 sm:h-6 sm:w-6 text-white" />
               </div>
               <span className="text-lg sm:text-xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-                BoisCraft
+                DariMeuble
               </span>
             </div>
 
@@ -401,14 +512,14 @@ export default function CartPage() {
                           </div>
 
                           <div className="flex items-center space-x-2">
-                            <Button
+                            {/* <Button
                               variant="ghost"
                               size="sm"
                               className="text-slate-600 hover:text-blue-600 text-xs sm:text-sm"
                             >
                               <Heart className="h-4 w-4 mr-1" />
                               <span className="hidden sm:inline">{t.saveForLater}</span>
-                            </Button>
+                            </Button> */}
                             <Button
                               variant="ghost"
                               size="sm"
@@ -437,88 +548,61 @@ export default function CartPage() {
               ))}
             </div>
           </div>
-
+            
           {/* Order Summary */}
           <div className="xl:col-span-1">
             <Card className="border-slate-200 shadow-lg sticky top-24">
-              <CardHeader className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-t-lg">
-                <CardTitle className="text-slate-800 text-lg sm:text-xl">{t.cartSummary}</CardTitle>
-              </CardHeader>
-              <CardContent className="p-4 sm:p-6 space-y-6">
-                <div className="space-y-4">
-                  <div className="flex justify-between items-center">
-                    <span className="text-slate-600">{t.subtotal}:</span>
-                    <span className="text-slate-800 font-medium">{formatPrice(subtotal)} {t.da}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-slate-600">{t.shipping}:</span>
-                    <span className="text-green-600 font-medium">{t.freeShipping}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-slate-600">{t.estimatedTax}:</span>
-                    <span className="text-slate-800 font-medium">{formatPrice(tax)} {t.da}</span>
-                  </div>
-                  <div className="border-t border-slate-200 pt-4">
-                    <div className="flex justify-between items-center">
-                      <span className="text-lg font-semibold text-slate-800">{t.orderTotal}:</span>
-                      <span className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-                        {formatPrice(total)} {t.da}
-                      </span>
-                    </div>
-                  </div>
+            <CardHeader className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-t-lg">
+              <CardTitle className="text-slate-800 text-lg sm:text-xl">{t.cartSummary}</CardTitle>
+            </CardHeader>
+            <CardContent className="p-4 sm:p-6 space-y-6">
+              <div className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-600">{t.subtotal}:</span>
+                  <span className="text-slate-800 font-medium">{formatPrice(subtotal)} {t.da}</span>
                 </div>
 
-                {/* Promo Code */}
-                <div className="border-t border-slate-200 pt-6">
-                  <div className="space-y-3">
-                    <label className="text-sm font-medium text-slate-700">{t.promoCode}</label>
-                    <div className="flex space-x-2">
-                      <Input
-                        placeholder={t.enterCode}
-                        value={promoCode}
-                        onChange={(e) => setPromoCode(e.target.value)}
-                        className="border-slate-300 focus:border-blue-600 text-sm"
-                      />
-                      <Button variant="outline" className="border-slate-300 text-slate-700 px-4 text-sm">
-                        {t.apply}
-                      </Button>
-                    </div>
+                <div className="border-t border-slate-200 pt-4">
+                  <div className="flex justify-between items-center">
+                    <span className="text-lg font-semibold text-slate-800">{t.orderTotal}:</span>
+                    <span className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
+                      {formatPrice(subtotal)} {t.da}
+                    </span>
                   </div>
                 </div>
+              </div>
 
-                {/* Checkout Button */}
-                <div className="border-t border-slate-200 pt-6">
-                  <Button className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white py-3 text-base sm:text-lg font-semibold shadow-lg">
-                    <CreditCard className="h-5 w-5 mr-2" />
-                    {t.proceedToCheckout}
-                  </Button>
-                </div>
+              {/* Checkout Button */}
+              <div className="border-t border-slate-200 pt-6">
+                <Button 
+                  onClick={proceedToCheckout}
+                  className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white py-3 text-base sm:text-lg font-semibold shadow-lg"
+                  disabled={cartItems.length === 0}
+                >
+                  <CreditCard className="h-5 w-5 mr-2" />
+                  {t.proceedToCheckout}
+                </Button>
+              </div>
 
-                {/* Security Features */}
-                <div className="border-t border-slate-200 pt-6">
-                  <div className="space-y-3 text-sm">
-                    <div className="flex items-center space-x-3">
-                      <div className="bg-blue-100 p-2 rounded-full">
-                        <Shield className="h-4 w-4 text-blue-600" />
-                      </div>
-                      <span className="text-slate-700">{t.secureDelivery}</span>
+              {/* Security Features - Keep only these */}
+              <div className="border-t border-slate-200 pt-6">
+                <div className="space-y-3 text-sm">
+                  <div className="flex items-center space-x-3">
+                    <div className="bg-green-100 p-2 rounded-full">
+                      <Truck className="h-4 w-4 text-green-600" />
                     </div>
-                    <div className="flex items-center space-x-3">
-                      <div className="bg-green-100 p-2 rounded-full">
-                        <Truck className="h-4 w-4 text-green-600" />
-                      </div>
-                      <span className="text-slate-700">{t.freeDelivery}</span>
+                    <span className="text-slate-700">{t.freeDelivery}</span>
+                  </div>
+                  <div className="flex items-center space-x-3">
+                    <div className="bg-purple-100 p-2 rounded-full">
+                      <CreditCard className="h-4 w-4 text-purple-600" />
                     </div>
-                    <div className="flex items-center space-x-3">
-                      <div className="bg-purple-100 p-2 rounded-full">
-                        <CreditCard className="h-4 w-4 text-purple-600" />
-                      </div>
-                      <span className="text-slate-700">{t.securePayment}</span>
-                    </div>
+                    <span className="text-slate-700">{t.securePayment}</span>
                   </div>
                 </div>
-              </CardContent>
-            </Card>
+              </div>
+            </CardContent>
+          </Card>
           </div>
         </div>
       </div>

@@ -1,28 +1,28 @@
-// This should be your main page.tsx file (SERVER COMPONENT)
+import { PrismaClient } from '@prisma/client';
 import ProductPageClient from './ProductPageClient';
 
-const productData = {
-  1: {
-    id: 1,
-    name: { fr: 'Table à Manger en Chêne Rustique', ar: 'طاولة طعام من خشب البلوط الريفي', en: 'Rustic Oak Dining Table' },
-    // ... rest of your product data
-  },
-  2: {
-    id: 2,
-    name: { fr: 'Chaise Ergonomique', ar: 'كرسي مريح', en: 'Ergonomic Chair' },
-    // ... add more products as needed
-  }
-};
+const prisma = new PrismaClient();
 
-// This function is required for static export with dynamic routes
 export async function generateStaticParams() {
-  return Object.keys(productData).map((id) => ({
-    id: id,
+  const productsData = await prisma.product.findMany({
+    select: {
+      id: true,
+    },
+  });
+  return productsData.map((product) => ({
+    id: product.id.toString(),
   }));
 }
 
-// Server component that passes data to client component
-export default function ProductPage({ params }: { params: { id: string } }) {
-  return <ProductPageClient params={params} />;
-  // return (<div> hello {params.id} </div>)
+// Use the exact interface that Next.js 15 expects
+interface Props {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}
+
+export default async function ProductPage({ params }: Props) {
+  const resolvedParams = await params;
+  const { id } = resolvedParams;
+  
+  return <ProductPageClient id={id} />;
 }
