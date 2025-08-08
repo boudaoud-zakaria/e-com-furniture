@@ -1,4 +1,4 @@
-// This is your Prisma schema file,
+// This is your Prisma schema file for BoisCraft E-commerce Platform
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
 generator client {
@@ -10,6 +10,15 @@ datasource db {
   url      = "file:./dev.db"
 }
 
+// ============================================================================
+// USER MANAGEMENT MODELS
+// ============================================================================
+
+/**
+ * User Model - Optional user accounts for customers who want to save preferences
+ * Used for: Customers who choose to create accounts for order history, saved addresses, etc.
+ * Note: Orders can be placed without user accounts (guest checkout)
+ */
 model User {
   id        String   @id @default(cuid())
   email     String   @unique
@@ -20,15 +29,21 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // Relations
-  orders    Order[]
-  reviews   Review[]
-  addresses Address[]
-  cart      CartItem[]
+  // Relations - All optional since guest checkout is supported
+  orders    Order[]    // Orders placed by registered users
+  reviews   Review[]   // Product reviews (only registered users can review)
+  addresses Address[]  // Saved addresses for quick checkout
+  wishlist  WishlistItem[] // Saved products for later (requires account)
+  manager   Manager?   // Manager profile if user is a manager
 
   @@map("users")
 }
 
+/**
+ * Manager Model - Staff accounts for managing specific product categories
+ * Used for: Store managers who handle orders and products in their assigned categories
+ * Created by: Admin through the admin dashboard
+ */
 model Manager {
   id         String   @id @default(cuid())
   userId     String   @unique
@@ -40,73 +55,95 @@ model Manager {
   // Relations
   user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   category Category @relation(fields: [categoryId], references: [id])
-  orders   Order[]
+  orders   Order[]  // Orders assigned to this manager
+  product Product[]
 
   @@map("managers")
 }
 
+// ============================================================================
+// PRODUCT CATALOG MODELS
+// ============================================================================
+
+/**
+ * Category Model - Product categories (Tables, Chairs, Cabinets, etc.)
+ * Used for: Organizing products and assigning managers to specific categories
+ * Managed by: Admin and assigned managers
+ */
 model Category {
   id          String   @id @default(cuid())
-  name        String   @unique
-  nameAr      String
-  nameEn      String
-  description String?
-  image       String?
+  name        String   @unique // French name (primary)
+  nameAr      String   // Arabic translation
+  nameEn      String   // English translation
+  description String?  // Category description
+  image       String?  // Category image URL
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   // Relations
-  products Product[]
-  managers Manager[]
+  products Product[] // Products in this category
+  managers Manager[] // Managers assigned to this category
 
   @@map("categories")
 }
 
+/**
+ * Product Model - Individual furniture products
+ * Used for: Displaying products, managing inventory, processing orders
+ * Managed by: Category managers and admin
+ */
 model Product {
   id              String   @id @default(cuid())
-  name            String
-  nameAr          String
-  nameEn          String
-  description     String
-  descriptionAr   String
-  descriptionEn   String
-  price           Int      // Price in centimes (DA)
-  originalPrice   Int?     // Original price for discounts
-  categoryId      String
-  material        String
-  materialAr      String
-  materialEn      String
-  dimensions      String   // JSON string for dimensions
-  images          String   // JSON array of image URLs
-  stock           Int      @default(0)
-  isActive        Boolean  @default(true)
-  isFeatured      Boolean  @default(false)
-  rating          Float    @default(0)
-  reviewCount     Int      @default(0)
-  salesCount      Int      @default(0)
+  name            String   // French name (primary)
+  nameAr          String   // Arabic translation
+  nameEn          String   // English translation
+  description     String   // French description
+  descriptionAr   String   // Arabic description
+  descriptionEn   String   // English description
+  price           Int      // Price in centimes (DA) - e.g., 89900 = 899.00 DA
+  originalPrice   Int?     // Original price for showing discounts
+  categoryId      String   // Category this product belongs to
+  managerId      String   // manager 
+  material        String   // French material name
+  materialAr      String   // Arabic material name
+  materialEn      String   // English material name
+  dimensions      String   // JSON string: {"length": 180, "width": 90, "height": 75}
+  images          String   // JSON array: ["url1", "url2", "url3"]
+  stock           Int      @default(0) // Available quantity
+  isActive        Boolean  @default(true) // Product visibility
+  isFeatured      Boolean  @default(false) // Show on homepage
+  rating          Float    @default(0) // Average rating (calculated)
+  reviewCount     Int      @default(0) // Total reviews (calculated)
+  salesCount      Int      @default(0) // Total sales (calculated)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
   // Relations
-  category    Category     @relation(fields: [categoryId], references: [id])
-  orderItems  OrderItem[]
-  reviews     Review[]
-  cartItems   CartItem[]
-  customizations ProductCustomization[]
+  category       Category              @relation(fields: [categoryId], references: [id])
+  manager       Manager              @relation(fields: [managerId], references: [id])
+  orderItems     OrderItem[]           // Items in orders
+  reviews        Review[]              // Customer reviews
+  customizations ProductCustomization[] // Available customizations
+  wishlistItems  WishlistItem[]        // Users who saved this product
 
   @@map("products")
 }
 
+/**
+ * ProductCustomization Model - Available customizations for products
+ * Used for: Defining finish options, size variations, etc.
+ * Example: Different wood finishes, custom dimensions
+ */
 model ProductCustomization {
-  id        String @id @default(cuid())
-  productId String
-  type      String // "finish", "dimension", etc.
-  name      String
-  nameAr    String
-  nameEn    String
-  value     String // JSON for complex values
-  priceModifier Float @default(0) // Percentage modifier
+  id            String @id @default(cuid())
+  productId     String
+  type          String // "finish", "dimension", "material", etc.
+  name          String // French name
+  nameAr        String // Arabic name
+  nameEn        String // English name
+  value         String // JSON for complex values: {"color": "#D2B48C", "code": "natural"}
+  priceModifier Float  @default(0) // Percentage modifier: 0.1 = +10%, -0.05 = -5%
 
   // Relations
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
@@ -114,53 +151,72 @@ model ProductCustomization {
   @@map("product_customizations")
 }
 
+// ============================================================================
+// ORDER MANAGEMENT MODELS
+// ============================================================================
+
+/**
+ * Order Model - Customer orders (supports both guest and registered users)
+ * Used for: Processing customer orders, tracking delivery, managing payments
+ * Payment: Cash on delivery only
+ * Guest Support: Orders can be placed without user accounts
+ */
 model Order {
   id                String      @id @default(cuid())
-  orderNumber       String      @unique
-  userId            String
-  managerId         String?
+  orderNumber       String      @unique // Auto-generated order number (e.g., "ORD-2024-001")
+  userId            String?     // Optional - null for guest orders
+  managerId         String?     // Assigned manager for processing
   status            OrderStatus @default(PENDING)
   priority          Priority    @default(MEDIUM)
-  totalAmount       Int         // Total in centimes (DA)
-  deliveryPrice     Int         @default(0)
-  paymentMethod     String
-  paymentStatus     PaymentStatus @default(PENDING)
+  totalAmount       Int         // Total in centimes (DA) including delivery
+  deliveryPrice     Int         @default(0) // Delivery cost in centimes
+  paymentMethod     String      @default("cash_on_delivery") // Always cash on delivery
+  paymentStatus     PaymentStatus @default(PENDING) // Paid when delivered
   
-  // Customer Info
+  // Customer Info (required for all orders, guest or registered)
   customerFirstName String
   customerLastName  String
   customerEmail     String
   customerPhone     String
   
-  // Delivery Info
+  // Delivery Info (required for all orders)
   deliveryAddress   String
   deliveryCity      String
   deliveryPostalCode String
-  deliveryDate      DateTime?
-  deliveryTime      String?
-  deliveryZone      String
-  deliveryService   String
-  specialInstructions String?
+  deliveryDate      DateTime?   // Requested delivery date
+  deliveryTime      String?     // Requested time slot
+  deliveryZone      String      // Calculated delivery zone
+  deliveryService   String      // Standard, Premium, Express
+  specialInstructions String?   // Customer notes
+  
+  // Guest Order Tracking (for orders without user accounts)
+  guestTrackingCode String?     // Unique code for guest order tracking
   
   createdAt         DateTime    @default(now())
   updatedAt         DateTime    @updatedAt
 
   // Relations
-  user      User        @relation(fields: [userId], references: [id])
+  user      User?       @relation(fields: [userId], references: [id]) // Optional for guest orders
   manager   Manager?    @relation(fields: [managerId], references: [id])
-  items     OrderItem[]
+  items     OrderItem[] // Products in this order
 
   @@map("orders")
 }
 
+/**
+ * OrderItem Model - Individual products within an order
+ * Used for: Storing product details, quantities, and customizations for each order
+ * Preserves product info even if product is later modified or deleted
+ */
 model OrderItem {
   id              String @id @default(cuid())
   orderId         String
   productId       String
+  productName     String // Preserved product name at time of order
   quantity        Int
-  unitPrice       Int    // Price per unit in centimes
-  totalPrice      Int    // Total price for this item
-  customizations  String // JSON string for customizations
+  unitPrice       Int    // Price per unit in centimes at time of order
+  totalPrice      Int    // Total price for this item (unitPrice * quantity)
+  customizations  String // JSON: {"finish": "dark", "dimensions": {"length": 200}}
   
   // Relations
   order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
@@ -169,12 +225,21 @@ model OrderItem {
   @@map("order_items")
 }
 
-model CartItem {
+// ============================================================================
+// CUSTOMER INTERACTION MODELS
+// ============================================================================
+
+/**
+ * WishlistItem Model - Saved products for registered users
+ * Used for: Users saving products for later purchase
+ * Guest Alternative: Product IDs stored in localStorage
+ * Note: Only available for registered users
+ */
+model WishlistItem {
   id             String @id @default(cuid())
   userId         String
   productId      String
-  quantity       Int
-  customizations String // JSON string for customizations
+  customizations String? // JSON string for saved customizations
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -183,16 +248,21 @@ model CartItem {
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@unique([userId, productId])
-  @@map("cart_items")
+  @@map("wishlist_items")
 }
 
+/**
+ * Review Model - Product reviews from registered customers
+ * Used for: Customer feedback and product ratings
+ * Restriction: Only registered users who purchased the product can review
+ */
 model Review {
   id        String   @id @default(cuid())
   userId    String
   productId String
   rating    Int      // 1-5 stars
   comment   String?
-  isVerified Boolean @default(false)
+  isVerified Boolean @default(false) // True if user actually purchased the product
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -200,21 +270,26 @@ model Review {
   user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
-  @@unique([userId, productId])
+  @@unique([userId, productId]) // One review per user per product
   @@map("reviews")
 }
 
+/**
+ * Address Model - Saved addresses for registered users
+ * Used for: Quick checkout for returning customers
+ * Guest Alternative: Address entered manually each time
+ */
 model Address {
   id         String  @id @default(cuid())
   userId     String
-  type       String  // "home", "work", etc.
+  type       String  // "home", "work", "other"
   firstName  String
   lastName   String
   address    String
   city       String
   postalCode String
   phone      String?
-  isDefault  Boolean @default(false)
+  isDefault  Boolean @default(false) // Default address for checkout
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
@@ -224,14 +299,23 @@ model Address {
   @@map("addresses")
 }
 
+// ============================================================================
+// DELIVERY SYSTEM MODELS
+// ============================================================================
+
+/**
+ * DeliveryZone Model - Delivery areas and pricing
+ * Used for: Calculating delivery costs based on postal codes
+ * Managed by: Admin
+ */
 model DeliveryZone {
   id          String @id @default(cuid())
-  name        String @unique
-  nameAr      String
-  nameEn      String
-  price       Int    // Delivery price in centimes
-  deliveryTime String // e.g., "2-3 jours"
-  postalCodes String // JSON array of postal codes
+  name        String @unique // "Paris Centre", "Île-de-France", etc.
+  nameAr      String // Arabic translation
+  nameEn      String // English translation
+  price       Int    // Delivery price in centimes (0 = free)
+  deliveryTime String // "1-2 jours", "2-3 jours", etc.
+  postalCodes String // JSON array: ["75001", "75002", "75003"]
   isActive    Boolean @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -239,16 +323,21 @@ model DeliveryZone {
   @@map("delivery_zones")
 }
 
+/**
+ * DeliveryService Model - Types of delivery services
+ * Used for: Different delivery options (Standard, Premium, Express)
+ * Example: Standard (free), Premium (+75€), Express (+125€)
+ */
 model DeliveryService {
   id          String @id @default(cuid())
-  name        String @unique
-  nameAr      String
-  nameEn      String
-  description String
-  descriptionAr String
-  descriptionEn String
-  price       Int    // Additional price in centimes
-  features    String // JSON array of features
+  name        String @unique // "Standard", "Premium", "Express"
+  nameAr      String // Arabic translation
+  nameEn      String // English translation
+  description String // French description
+  descriptionAr String // Arabic description
+  descriptionEn String // English description
+  price       Int    // Additional price in centimes (0 for standard)
+  features    String // JSON array: ["Livraison à domicile", "Installation incluse"]
   isActive    Boolean @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -256,33 +345,70 @@ model DeliveryService {
   @@map("delivery_services")
 }
 
+// ============================================================================
+// SYSTEM CONFIGURATION MODELS
+// ============================================================================
+
+/**
+ * Settings Model - Application configuration
+ * Used for: Storing app settings, feature flags, business rules
+ * Example: Tax rates, business hours, contact information
+ */
 model Settings {
   id    String @id @default(cuid())
-  key   String @unique
-  value String
+  key   String @unique // "tax_rate", "business_phone", "free_delivery_threshold"
+  value String // The setting value
   type  String // "string", "number", "boolean", "json"
+  description String? // What this setting controls
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@map("settings")
 }
 
-// Enums
+// ============================================================================
+// ENUMS - Define possible values for specific fields
+// ============================================================================
+
+/**
+ * UserRole Enum - Types of user accounts
+ * CUSTOMER: Regular customers (optional accounts)
+ * MANAGER: Category managers
+ * ADMIN: System administrators
+ */
 enum UserRole {
   CUSTOMER
   MANAGER
   ADMIN
 }
 
+/**
+ * OrderStatus Enum - Order processing stages
+ * PENDING: Just placed, awaiting confirmation
+ * CONFIRMED: Confirmed by manager, in production queue
+ * IN_PROGRESS: Being manufactured
+ * READY_FOR_DELIVERY: Completed, ready to ship
+ * OUT_FOR_DELIVERY: On delivery truck
+ * DELIVERED: Successfully delivered and paid (cash on delivery)
+ * CANCELLED: Order cancelled
+ */
 enum OrderStatus {
   PENDING
   CONFIRMED
   IN_PROGRESS
   READY_FOR_DELIVERY
+  OUT_FOR_DELIVERY
   DELIVERED
   CANCELLED
 }
 
+/**
+ * Priority Enum - Order priority levels
+ * LOW: Standard orders
+ * MEDIUM: Default priority
+ * HIGH: Rush orders
+ * URGENT: Emergency orders
+ */
 enum Priority {
   LOW
   MEDIUM
@@ -290,6 +416,13 @@ enum Priority {
   URGENT
 }
 
+/**
+ * PaymentStatus Enum - Payment tracking
+ * PENDING: Cash on delivery, not yet paid
+ * PAID: Payment received upon delivery
+ * FAILED: Delivery attempted but payment refused
+ * REFUNDED: Money returned to customer
+ */
 enum PaymentStatus {
   PENDING
   PAID
