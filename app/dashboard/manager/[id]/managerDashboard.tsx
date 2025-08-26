@@ -130,6 +130,7 @@ const ManagerDashboard: React.FC<ManagerDashboardProps> = ({ managerId }) => {
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
+  const [productLoading, setProductLoading] = useState(false);
   const [showProductModal, setShowProductModal] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -192,6 +193,7 @@ const ManagerDashboard: React.FC<ManagerDashboardProps> = ({ managerId }) => {
 
   const handleCreateProduct = async (e: React.FormEvent) => {
     e.preventDefault();
+    setProductLoading(true); 
     try {
       await createProduct(managerId, {
         ...productForm,
@@ -202,6 +204,8 @@ const ManagerDashboard: React.FC<ManagerDashboardProps> = ({ managerId }) => {
       loadData();
     } catch (error) {
       console.error('Error creating product:', error);
+    } finally {
+      setProductLoading(false); 
     }
   };
 
@@ -209,6 +213,7 @@ const ManagerDashboard: React.FC<ManagerDashboardProps> = ({ managerId }) => {
     e.preventDefault();
     if (!editingProduct) return;
     
+    setProductLoading(true); 
     try {
       await updateProduct(editingProduct.id, managerId, productForm);
       setShowProductModal(false);
@@ -217,6 +222,8 @@ const ManagerDashboard: React.FC<ManagerDashboardProps> = ({ managerId }) => {
       loadData();
     } catch (error) {
       console.error('Error updating product:', error);
+    } finally {
+      setProductLoading(false); 
     }
   };
 
@@ -1167,9 +1174,16 @@ const ManagerDashboard: React.FC<ManagerDashboardProps> = ({ managerId }) => {
                   </button>
                   <button
                     type="submit"
-                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+                    disabled={productLoading} // Add this line
+                    className={`px-4 py-2 rounded-lg ${
+                      productLoading 
+                        ? 'bg-gray-400 cursor-not-allowed' 
+                        : 'bg-indigo-600 hover:bg-indigo-700'
+                    } text-white`} // Modify this line
                   >
-                    {editingProduct ? 'Update Product' : 'Create Product'}
+                    {productLoading 
+                      ? (editingProduct ? 'Updating...' : 'Creating...') 
+                      : (editingProduct ? 'Update Product' : 'Create Product')} {/* Modify this line */}
                   </button>
                 </div>
               </form>
