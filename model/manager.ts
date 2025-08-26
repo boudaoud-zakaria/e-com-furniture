@@ -229,10 +229,41 @@ export async function deleteProduct(productId: string, managerId: string) {
       throw new Error('Manager ID is required');
     }
     
+    // Check if product has any orders
+    const productWithOrders = await prisma.product.findUnique({
+      where: { 
+        id: productId,
+        managerId 
+      },
+      include: {
+        orderItems: true,
+        reviews: true,
+        wishlistItems: true
+      }
+    });
+
+    if (!productWithOrders) {
+      throw new Error('Product not found or unauthorized');
+    }
+
+    // Delete all orders that have relation with this product
+    if (productWithOrders.orderItems.length > 0) {
+      // Get all unique order IDs that contain this product
+      const orderIds = [...new Set(productWithOrders.orderItems.map(item => item.orderId))];
+      
+      // Delete all orders that contain this product (will cascade delete order items)
+      await prisma.order.deleteMany({
+        where: { 
+          id: { in: orderIds }
+        }
+      });
+    }
+
+    // Proceed with deletion (cascade will handle reviews and wishlist items)
     await prisma.product.delete({
       where: { 
         id: productId,
-        managerId // Ensure manager can only delete their own products
+        managerId 
       }
     });
 
@@ -291,4 +322,5 @@ export async function getCategories() {
     console.error('Error fetching categories:', error);
     throw error;
   }
+
 }
