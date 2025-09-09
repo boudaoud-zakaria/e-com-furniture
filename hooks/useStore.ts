@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useTransition } from 'react'
+import { useState, useEffect, useTransition, useCallback, useMemo } from 'react'
 import { 
   getProducts, 
   getCategories, 
@@ -33,6 +33,7 @@ export interface StoreState {
   availableMaterials: string[]
   isLoading: boolean
   error: string | null
+  isInitialized: boolean
 }
 
 const initialFilters: StoreFilters = {
@@ -55,62 +56,143 @@ const initialState: StoreState = {
   priceRange: { min: 0, max: 150000 },
   availableMaterials: [],
   isLoading: true,
-  error: null
+  error: null,
+  isInitialized: false
 }
+
+// Cache for static data
+let categoriesCache: CategoryWithCount[] | null = null
+let priceRangeCache: { min: number; max: number } | null = null
+let materialsCache: { [key: string]: string[] } = {}
 
 export function useStore() {
   const [filters, setFilters] = useState<StoreFilters>(initialFilters)
   const [state, setState] = useState<StoreState>(initialState)
   const [isPending, startTransition] = useTransition()
 
-  // Load initial data
+  // Debounced search
+  const [searchTimeout, setSearchTimeout] = useState<NodeJS.Timeout | null>(null)
+
+  // Memoize filter changes to prevent unnecessary re-renders
+  const filterKey = useMemo(() => 
+    JSON.stringify({
+      search: filters.search,
+      categoryId: filters.categoryId,
+      minPrice: filters.minPrice,
+      maxPrice: filters.maxPrice,
+      sortBy: filters.sortBy,
+      page: filters.page,
+      language: filters.language
+    }), [filters]
+  )
+
+  // Load initial data only once
   useEffect(() => {
-    loadInitialData()
-  }, [])
+    if (!state.isInitialized) {
+      loadInitialData()
+    }
+  }, [state.isInitialized])
 
-  // Load products when filters change
+  // Load products with debouncing for search
   useEffect(() => {
-    loadProducts()
-  }, [filters])
+    if (!state.isInitialized) return
 
-  const loadInitialData = async () => {
-    startTransition(async () => {
-      try {
-        setState(prev => ({ ...prev, isLoading: true, error: null }))
+    if (searchTimeout) {
+      clearTimeout(searchTimeout)
+    }
 
-        const [categoriesData, priceRangeData, materialsData] = await Promise.all([
-          getCategories(),
-          getPriceRange(),
-          getMaterials(filters.language)
-        ])
+    const timeout = setTimeout(() => {
+      loadProducts()
+    }, filters.search ? 300 : 0) // Debounce only for search
 
-        setState(prev => ({
-          ...prev,
-          categories: categoriesData,
-          priceRange: priceRangeData,
-          availableMaterials: materialsData,
-          isLoading: false
-        }))
+    setSearchTimeout(timeout)
 
-        // Update filters with actual price range
-        setFilters(prev => ({
-          ...prev,
-          minPrice: priceRangeData.min,
-          maxPrice: priceRangeData.max
-        }))
+    return () => {
+      if (timeout) clearTimeout(timeout)
+    }
+  }, [filterKey, state.isInitialized])
 
-      } catch (error) {
-        console.error('Error loading initial data:', error)
-        setState(prev => ({
-          ...prev,
-          error: 'Failed to load store data',
-          isLoading: false
-        }))
+  const loadInitialData = useCallback(async () => {
+    try {
+      setState(prev => ({ ...prev, isLoading: true, error: null }))
+
+      // Use cached data if available
+      const promises = []
+      
+      if (!categoriesCache) {
+        promises.push(getCategories())
       }
-    })
-  }
+      
+      if (!priceRangeCache) {
+        promises.push(getPriceRange())
+      }
+      
+      if (!materialsCache[filters.language]) {
+        promises.push(getMaterials(filters.language))
+      }
 
-  const loadProducts = async () => {
+      // Load initial products in parallel
+      promises.push(getProducts({
+        search: '',
+        categoryId: 'all',
+        minPrice: 0,
+        maxPrice: 150000,
+        sortBy: 'popularity',
+        page: 1,
+        limit: 12,
+        language: filters.language
+      }))
+
+      const results = await Promise.all(promises)
+      let resultIndex = 0
+
+      // Update caches
+      if (!categoriesCache) {
+        categoriesCache = results[resultIndex++]
+      }
+      
+      if (!priceRangeCache) {
+        priceRangeCache = results[resultIndex++]
+      }
+      
+      if (!materialsCache[filters.language]) {
+        materialsCache[filters.language] = results[resultIndex++]
+      }
+
+      const productsData = results[resultIndex]
+
+      setState(prev => ({
+        ...prev,
+        categories: categoriesCache!,
+        priceRange: priceRangeCache!,
+        availableMaterials: materialsCache[filters.language],
+        products: productsData.products,
+        totalCount: productsData.totalCount,
+        totalPages: productsData.totalPages,
+        currentPage: productsData.currentPage,
+        isLoading: false,
+        isInitialized: true
+      }))
+
+      // Update filters with actual price range
+      setFilters(prev => ({
+        ...prev,
+        minPrice: priceRangeCache!.min,
+        maxPrice: priceRangeCache!.max
+      }))
+
+    } catch (error) {
+      console.error('Error loading initial data:', error)
+      setState(prev => ({
+        ...prev,
+        error: 'Failed to load store data',
+        isLoading: false,
+        isInitialized: true
+      }))
+    }
+  }, [filters.language])
+
+  const loadProducts = useCallback(async () => {
     startTransition(async () => {
       try {
         setState(prev => ({ ...prev, isLoading: true, error: null }))
@@ -144,41 +226,51 @@ export function useStore() {
         }))
       }
     })
-  }
+  }, [filters])
 
-  // Filter update functions
-  const updateSearch = (search: string) => {
+  // Optimized filter update functions
+  const updateSearch = useCallback((search: string) => {
     setFilters(prev => ({ ...prev, search, page: 1 }))
-  }
+  }, [])
 
-  const updateCategory = (categoryId: string) => {
+  const updateCategory = useCallback((categoryId: string) => {
     setFilters(prev => ({ ...prev, categoryId, page: 1 }))
-  }
+  }, [])
 
-  const updatePriceRange = (minPrice: number, maxPrice: number) => {
+  const updatePriceRange = useCallback((minPrice: number, maxPrice: number) => {
     setFilters(prev => ({ ...prev, minPrice, maxPrice, page: 1 }))
-  }
+  }, [])
 
-  const updateSortBy = (sortBy: StoreFilters['sortBy']) => {
+  const updateSortBy = useCallback((sortBy: StoreFilters['sortBy']) => {
     setFilters(prev => ({ ...prev, sortBy, page: 1 }))
-  }
+  }, [])
 
-  const updateLanguage = (language: StoreFilters['language']) => {
+  const updateLanguage = useCallback((language: StoreFilters['language']) => {
+    // Clear materials cache for new language if not cached
+    if (!materialsCache[language]) {
+      getMaterials(language).then(materials => {
+        materialsCache[language] = materials
+        setState(prev => ({ ...prev, availableMaterials: materials }))
+      })
+    } else {
+      setState(prev => ({ ...prev, availableMaterials: materialsCache[language] }))
+    }
+    
     setFilters(prev => ({ ...prev, language, page: 1 }))
-  }
+  }, [])
 
-  const updatePage = (page: number) => {
+  const updatePage = useCallback((page: number) => {
     setFilters(prev => ({ ...prev, page }))
-  }
+  }, [])
 
-  const resetFilters = () => {
+  const resetFilters = useCallback(() => {
     setFilters({
       ...initialFilters,
-      language: filters.language, // Keep current language
+      language: filters.language,
       minPrice: state.priceRange.min,
       maxPrice: state.priceRange.max
     })
-  }
+  }, [filters.language, state.priceRange])
 
   return {
     // State
@@ -194,7 +286,7 @@ export function useStore() {
     updateLanguage,
     updatePage,
     resetFilters,
-    loadProducts,
+    loadProducts: loadProducts,
     loadInitialData
   }
 }
