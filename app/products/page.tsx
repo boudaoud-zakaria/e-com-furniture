@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useTransition } from 'react';
+import { useEffect, useState, useTransition, useMemo, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -8,7 +8,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Slider } from '@/components/ui/slider';
-import { getCategories, getFeaturedProducts } from '@/lib/action/home-actions';
 import { 
   Search, 
   Filter, 
@@ -118,23 +117,16 @@ export default function ProductsPage() {
   const [viewMode, setViewMode] = useState('grid');
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [cart, setCart] = useState<any[]>([]);
-
-  const [categories, setCategories] = useState([]);
-  const [featuredProducts, setFeaturedProducts] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isPending, startTransition] = useTransition();
   
-  const [scrollY, setScrollY] = useState(0);
-
   const {
     products,
-    // categories,
+    categories,
     totalCount,
     totalPages,
     currentPage,
     priceRange,
     availableMaterials,
-    // isLoading,
+    isLoading,
     error,
     filters,
     updateSearch,
@@ -143,50 +135,40 @@ export default function ProductsPage() {
     updateSortBy,
     updateLanguage,
     updatePage,
-    resetFilters
+    resetFilters,
+    isInitialized
   } = useStore();
 
-  const t = translations[filters.language] || translations.en;
-  const isRTL = filters.language === 'ar';
+  const t = useMemo(() => translations[filters.language] || translations.en, [filters.language]);
+  const isRTL = useMemo(() => filters.language === 'ar', [filters.language]);
 
+  // Load cart from localStorage only once on mount
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setIsLoading(true);
-        const [categoriesData, productsData] = await Promise.all([
-          getCategories(),
-          getFeaturedProducts()
-        ]);
-
-        startTransition(() => {
-          setCategories(categoriesData);
-          setFeaturedProducts(productsData);
-          setIsLoading(false);
-        });
-      } catch (error) {
-        console.error('Error fetching data:', error);
-        setIsLoading(false);
+    try {
+      const savedCart = localStorage.getItem('cart');
+      if (savedCart) {
+        setCart(JSON.parse(savedCart));
       }
-    };
-
-    fetchData();
+    } catch (error) {
+      console.error('Error loading cart:', error);
+    }
   }, []);
 
-  const addToCart = (productData: any) => {
-  console.log('🛒 Adding to cart - Product data:', productData);
-  
-  const cartItem = {
-      id: productData.id,
-      quantity: 1,
-      finish: 'natural', // default finish
-      dimensions: {
-        length: 180,
-        width: 90,
-        height: 75
-      }, // default dimensions
-      price: productData.price,
-      addedAt: new Date().toISOString()
-    };
+  const addToCart = useCallback((productData: any) => {
+    console.log('🛒 Adding to cart - Product data:', productData);
+    
+    const cartItem = {
+        id: productData.id,
+        quantity: 1,
+        finish: 'natural', // default finish
+        dimensions: {
+          length: 180,
+          width: 90,
+          height: 75
+        }, // default dimensions
+        price: productData.price,
+        addedAt: new Date().toISOString()
+      };
 
     console.log('🛒 Cart item to add:', cartItem);
 
@@ -222,16 +204,28 @@ export default function ProductsPage() {
 
     // Show success message
     alert(`${getProductName(productData, filters.language)} ${t.addToCart}!`);
-  };
+  }, [filters.language, t]);
 
-  const getCategoryName = (category: any) => {
-  if (category.name && typeof category.name === 'object') {
-    return category.name[filters.language] || category.name.fr;
+  const getCategoryName = useCallback((category: any) => {
+    if (category.name && typeof category.name === 'object') {
+      return category.name[filters.language] || category.name.fr;
+    }
+    return filters.language === 'ar' ? category.nameAr : 
+           filters.language === 'en' ? category.nameEn : 
+           category.name;
+  }, [filters.language]);
+
+  // Show loading state until store is initialized
+  if (!isInitialized ) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-slate-600">{t.loading}</p>
+        </div>
+      </div>
+    );
   }
-  return filters.language === 'ar' ? category.nameAr : 
-         filters.language === 'en' ? category.nameEn : 
-         category.name;
-};
 
   if (error) {
     return (
@@ -314,7 +308,7 @@ export default function ProductsPage() {
                 </div>
 
                 <Button variant="ghost" size="sm" className="text-slate-700 hover:text-blue-600 hover:bg-blue-50 relative" 
-                onClick={()=>window.location.href="/card"}
+                onClick={() => window.location.href="/card"}
                 >
                   <ShoppingCart className="h-4 w-4" />
                   {cart.length > 0 && (
@@ -337,15 +331,6 @@ export default function ProductsPage() {
               <CardContent className="p-4 sm:p-6">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-lg font-semibold text-slate-800">{t.categories}</h3>
-                  {/* <br />
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={resetFilters}
-                    className="text-xs text-blue-600 hover:text-blue-700"
-                  >
-                    {t.resetFilters}
-                  </Button> */}
                 </div>
                 <div className="space-y-2">
                   <button
@@ -370,7 +355,7 @@ export default function ProductsPage() {
                       }`}
                     >
                       <span>{getCategoryName(category)}</span>
-                      <span className="text-xs sm:text-sm text-blue-600">({category.count || category._count?.products || 0})</span>
+                      <span className="text-xs sm:text-sm text-blue-600">({category._count?.products || 0})</span>
                     </button>
                   ))}
                 </div>
@@ -420,14 +405,7 @@ export default function ProductsPage() {
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4 sm:mb-6">
               <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
                 <span className="text-sm sm:text-base text-slate-700">
-                  {isLoading ? (
-                    <div className="flex items-center gap-2">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      {t.loading}
-                    </div>
-                  ) : (
-                    `${totalCount} ${t.productsFound}`
-                  )}
+                  {`${totalCount} ${t.productsFound}`}
                 </span>
                 
                 <div className="flex items-center space-x-2">
@@ -465,14 +443,7 @@ export default function ProductsPage() {
             </div>
 
             {/* Products Grid */}
-            {isLoading ? (
-              <div className="min-h-full bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 flex items-center justify-center">
-                <div className="text-center">
-                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-                  <p className="text-slate-600">Loading product...</p>
-                </div>
-              </div>
-            ) : products.length === 0 ? (
+            {products.length === 0 ? (
               <div className="text-center py-12">
                 <p className="text-slate-600 text-lg">{t.noProducts}</p>
                 <Button onClick={resetFilters} className="mt-4">
