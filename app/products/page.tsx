@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useTransition, useMemo, useCallback } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -22,15 +22,12 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { useStore } from '@/hooks/useStore';
 import { 
-  formatPrice, 
-  getProductImages, 
-  parseJSON, 
-  getProductName,
-  getProductMaterial,
-  getProductBadge
-} from '@/lib/utils';
+  fetchAllProducts,
+  fetchCategories,
+  fetchPriceRange,
+  fetchMaterials
+} from '@/lib/action/home-actions';
 
 const translations = {
   fr: {
@@ -113,36 +110,83 @@ const translations = {
   }
 };
 
+// Utility functions
+const formatPrice = (price: number): string => {
+  return new Intl.NumberFormat('fr-FR', {
+    style: 'decimal',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(price) + ' DA';
+};
+
+const getProductImages = (product: any): string[] => {
+  if (product.images) {
+    try {
+      const parsed = JSON.parse(product.images);
+      return Array.isArray(parsed) ? parsed : [parsed];
+    } catch {
+      return [product.images];
+    }
+  }
+  return ['https://images.pexels.com/photos/1350789/pexels-photo-1350789.jpeg?auto=compress&cs=tinysrgb&w=500&h=400'];
+};
+
+const getProductName = (product: any, language: string = 'fr'): string => {
+  switch (language) {
+    case 'ar':
+      return product.nameAr || product.name || 'منتج';
+    case 'en':
+      return product.nameEn || product.name || 'Product';
+    default:
+      return product.name || product.nameEn || 'Produit';
+  }
+};
+
+const getProductBadge = (product: any, language: string = 'fr'): string => {
+  if (product.salesCount > 50) {
+    switch (language) {
+      case 'ar': return 'الأكثر مبيعاً';
+      case 'en': return 'Best Seller';
+      default: return 'Meilleure Vente';
+    }
+  }
+  
+  switch (language) {
+    case 'ar': return 'جديد';
+    case 'en': return 'New';
+    default: return 'Nouveau';
+  }
+};
+
 export default function ProductsPage() {
-  const [viewMode, setViewMode] = useState('grid');
-  const [isFilterOpen, setIsFilterOpen] = useState(false);
+  // Core data states
+  const [allProducts, setAllProducts] = useState<any[]>([]);
+  const [categories, setCategories] = useState<any[]>([]);
+  const [priceRange, setPriceRange] = useState({ min: 0, max: 150000 });
+  const [availableMaterials, setAvailableMaterials] = useState<string[]>([]);
   const [cart, setCart] = useState<any[]>([]);
   
-  const {
-    products,
-    categories,
-    totalCount,
-    totalPages,
-    currentPage,
-    priceRange,
-    availableMaterials,
-    isLoading,
-    error,
-    filters,
-    updateSearch,
-    updateCategory,
-    updatePriceRange,
-    updateSortBy,
-    updateLanguage,
-    updatePage,
-    resetFilters,
-    isInitialized
-  } = useStore();
+  // Filter states
+  const [search, setSearch] = useState('');
+  const [categoryId, setCategoryId] = useState('all');
+  const [minPrice, setMinPrice] = useState(0);
+  const [maxPrice, setMaxPrice] = useState(150000);
+  const [sortBy, setSortBy] = useState('popularity');
+  const [language, setLanguage] = useState<'fr' | 'ar' | 'en'>('fr');
+  const [viewMode, setViewMode] = useState('grid');
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
+  
+  // Pagination states
+  const [currentPage, setCurrentPage] = useState(1);
+  const [productsPerPage] = useState(12);
+  
+  // Loading states
+  const [isLoading, setIsLoading] = useState(true);
 
-  const t = useMemo(() => translations[filters.language] || translations.en, [filters.language]);
-  const isRTL = useMemo(() => filters.language === 'ar', [filters.language]);
+  const t = translations[language];
+  const isRTL = language === 'ar';
 
-  // Load cart from localStorage only once on mount
+  // Load cart from localStorage
   useEffect(() => {
     try {
       const savedCart = localStorage.getItem('cart');
@@ -154,89 +198,184 @@ export default function ProductsPage() {
     }
   }, []);
 
-  const addToCart = useCallback((productData: any) => {
-    console.log('🛒 Adding to cart - Product data:', productData);
-    
-    const cartItem = {
-        id: productData.id,
-        quantity: 1,
-        finish: 'natural', // default finish
-        dimensions: {
-          length: 180,
-          width: 90,
-          height: 75
-        }, // default dimensions
-        price: productData.price,
-        addedAt: new Date().toISOString()
-      };
+  // Load all data once on component mount
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        setIsLoading(true);
+        console.log("Loading all data...");
+        
+        // Load all data in parallel
+        const [productsData, categoriesData, priceRangeData, materialsData] = await Promise.all([
+          fetchAllProducts(),
+          fetchCategories(),
+          fetchPriceRange(),
+          fetchMaterials()
+        ]);
 
-    console.log('🛒 Cart item to add:', cartItem);
+        setAllProducts(productsData);
+        setCategories(categoriesData);
+        setPriceRange(priceRangeData);
+        setMinPrice(priceRangeData.min);
+        setMaxPrice(priceRangeData.max);
+        setAvailableMaterials(materialsData);
+        
+        console.log("All data loaded successfully");
+      } catch (error) {
+        console.error("Error loading data:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
 
-    // Get existing cart from localStorage
-    const existingCart = JSON.parse(localStorage.getItem('cart') || '[]');
-    console.log('🛒 Existing cart before adding:', existingCart);
+    loadData();
+  }, []);
 
-    // Check if item already exists
-    const existingItemIndex = existingCart.findIndex((item: any) => 
-      item.id === productData.id && 
-      item.finish === 'natural' &&
-      JSON.stringify(item.dimensions) === JSON.stringify(cartItem.dimensions)
+  // CLIENT-SIDE FILTERING AND SORTING (super fast!)
+  const filteredAndSortedProducts = useMemo(() => {
+    let filtered = allProducts;
+
+    // Filter by category
+    if (categoryId !== 'all') {
+      filtered = filtered.filter(product => product.categoryId === categoryId);
+    }
+
+    // Filter by search
+    if (search.trim() !== '') {
+      const searchLower = search.toLowerCase();
+      filtered = filtered.filter(product => 
+        getProductName(product, language).toLowerCase().includes(searchLower) ||
+        (product.description && product.description.toLowerCase().includes(searchLower)) ||
+        (product.material && product.material.toLowerCase().includes(searchLower))
+      );
+    }
+
+    // Filter by price range
+    filtered = filtered.filter(product => 
+      product.price >= minPrice && product.price <= maxPrice
     );
 
-    console.log('🛒 Existing item index:', existingItemIndex);
+    // Sort products
+    switch (sortBy) {
+      case 'price-low':
+        filtered.sort((a, b) => a.price - b.price);
+        break;
+      case 'price-high':
+        filtered.sort((a, b) => b.price - a.price);
+        break;
+      case 'rating':
+        filtered.sort((a, b) => (b.rating || 0) - (a.rating || 0));
+        break;
+      case 'name':
+        filtered.sort((a, b) => getProductName(a, language).localeCompare(getProductName(b, language)));
+        break;
+      default: // popularity
+        filtered.sort((a, b) => (b.salesCount || 0) - (a.salesCount || 0));
+        break;
+    }
+
+    return filtered;
+  }, [allProducts, categoryId, search, minPrice, maxPrice, sortBy, language]);
+
+  // CLIENT-SIDE PAGINATION (also super fast!)
+  const paginatedProducts = useMemo(() => {
+    const startIndex = (currentPage - 1) * productsPerPage;
+    const endIndex = startIndex + productsPerPage;
+    return filteredAndSortedProducts.slice(startIndex, endIndex);
+  }, [filteredAndSortedProducts, currentPage, productsPerPage]);
+
+  const totalPages = Math.ceil(filteredAndSortedProducts.length / productsPerPage);
+
+  // Add to cart function
+  const addToCart = (productData: any) => {
+    console.log('Adding to cart:', productData);
+    
+    const cartItem = {
+      id: productData.id,
+      quantity: 1,
+      finish: 'natural',
+      dimensions: { length: 180, width: 90, height: 75 },
+      price: productData.price,
+      addedAt: new Date().toISOString()
+    };
+
+    const existingCart = JSON.parse(localStorage.getItem('cart') || '[]');
+    const existingItemIndex = existingCart.findIndex((item: any) => 
+      item.id === productData.id && 
+      item.finish === 'natural'
+    );
 
     if (existingItemIndex > -1) {
-      // Update quantity if item exists
       existingCart[existingItemIndex].quantity += 1;
-      console.log('🛒 Updated existing item quantity');
     } else {
-      // Add new item
       existingCart.push(cartItem);
-      console.log('🛒 Added new item to cart');
     }
 
-    // Save back to localStorage
     localStorage.setItem('cart', JSON.stringify(existingCart));
-    console.log('🛒 Final cart saved to localStorage:', existingCart);
-
-    // Update local state
     setCart(existingCart);
 
-    // Show success message
-    alert(`${getProductName(productData, filters.language)} ${t.addToCart}!`);
-  }, [filters.language, t]);
+    alert(`${getProductName(productData, language)} ${t.addToCart}!`);
+  };
 
-  const getCategoryName = useCallback((category: any) => {
-    if (category.name && typeof category.name === 'object') {
-      return category.name[filters.language] || category.name.fr;
+  // Filter handlers (no API calls!)
+  const handleSearchChange = (value: string) => {
+    setSearch(value);
+    setCurrentPage(1);
+  };
+
+  const handleCategoryChange = (value: string) => {
+    setCategoryId(value);
+    setCurrentPage(1);
+  };
+
+  const handlePriceRangeChange = ([min, max]: number[]) => {
+    setMinPrice(min);
+    setMaxPrice(max);
+    setCurrentPage(1);
+  };
+
+  const handleSortChange = (value: string) => {
+    setSortBy(value);
+    setCurrentPage(1);
+  };
+
+  const handleLanguageChange = (lang: 'fr' | 'ar' | 'en') => {
+    setLanguage(lang);
+    setCurrentPage(1);
+  };
+
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page);
+  };
+
+  const resetFilters = () => {
+    setSearch('');
+    setCategoryId('all');
+    setMinPrice(priceRange.min);
+    setMaxPrice(priceRange.max);
+    setSortBy('popularity');
+    setCurrentPage(1);
+  };
+
+  const getCategoryName = (category: any) => {
+    switch (language) {
+      case 'ar':
+        return category.nameAr || category.name;
+      case 'en':
+        return category.nameEn || category.name;
+      default:
+        return category.name;
     }
-    return filters.language === 'ar' ? category.nameAr : 
-           filters.language === 'en' ? category.nameEn : 
-           category.name;
-  }, [filters.language]);
+  };
 
-  // Show loading state until store is initialized
-  if (!isInitialized ) {
+  // Loading state
+  if (isLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
           <p className="text-slate-600">{t.loading}</p>
         </div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 flex items-center justify-center">
-        <Card className="p-8 text-center">
-          <h2 className="text-xl font-semibold text-red-600 mb-2">Erreur</h2>
-          <p className="text-slate-600">{error}</p>
-          <Button onClick={() => window.location.reload()} className="mt-4">
-            Réessayer
-          </Button>
-        </Card>
       </div>
     );
   }
@@ -263,8 +402,8 @@ export default function ProductsPage() {
                 <Search className="absolute left-3 top-3 h-4 w-4 text-blue-600" />
                 <Input
                   placeholder={t.searchProducts}
-                  value={filters.search}
-                  onChange={(e) => updateSearch(e.target.value)}
+                  value={search}
+                  onChange={(e) => handleSearchChange(e.target.value)}
                   className="pl-10 w-full sm:w-64 border-slate-300 focus:border-blue-600"
                 />
               </div>
@@ -284,24 +423,24 @@ export default function ProductsPage() {
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => updateLanguage('fr')}
-                    className={`text-xs sm:text-sm ${filters.language === 'fr' ? 'bg-blue-100 text-blue-600' : 'text-slate-600'}`}
+                    onClick={() => handleLanguageChange('fr')}
+                    className={`text-xs sm:text-sm ${language === 'fr' ? 'bg-blue-100 text-blue-600' : 'text-slate-600'}`}
                   >
                     FR
                   </Button>
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => updateLanguage('ar')}
-                    className={`text-xs sm:text-sm ${filters.language === 'ar' ? 'bg-blue-100 text-blue-600' : 'text-slate-600'}`}
+                    onClick={() => handleLanguageChange('ar')}
+                    className={`text-xs sm:text-sm ${language === 'ar' ? 'bg-blue-100 text-blue-600' : 'text-slate-600'}`}
                   >
                     AR
                   </Button>
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => updateLanguage('en')}
-                    className={`text-xs sm:text-sm ${filters.language === 'en' ? 'bg-blue-100 text-blue-600' : 'text-slate-600'}`}
+                    onClick={() => handleLanguageChange('en')}
+                    className={`text-xs sm:text-sm ${language === 'en' ? 'bg-blue-100 text-blue-600' : 'text-slate-600'}`}
                   >
                     EN
                   </Button>
@@ -334,28 +473,30 @@ export default function ProductsPage() {
                 </div>
                 <div className="space-y-2">
                   <button
-                    onClick={() => updateCategory('all')}
+                    onClick={() => handleCategoryChange('all')}
                     className={`flex items-center justify-between w-full p-2 rounded-lg transition-colors text-sm sm:text-base ${
-                      filters.categoryId === 'all'
+                      categoryId === 'all'
                         ? 'bg-blue-100 text-blue-800'
                         : 'hover:bg-blue-50 text-slate-700'
                     }`}
                   >
                     <span>{t.allProducts}</span>
-                    <span className="text-xs sm:text-sm text-blue-600">({totalCount})</span>
+                    <span className="text-xs sm:text-sm text-blue-600">({allProducts.length})</span>
                   </button>
                   {categories.map(category => (
                     <button
                       key={category.id}
-                      onClick={() => updateCategory(category.id)}
+                      onClick={() => handleCategoryChange(category.id)}
                       className={`flex items-center justify-between w-full p-2 rounded-lg transition-colors text-sm sm:text-base ${
-                        filters.categoryId === category.id
+                        categoryId === category.id
                           ? 'bg-blue-100 text-blue-800'
                           : 'hover:bg-blue-50 text-slate-700'
                       }`}
                     >
                       <span>{getCategoryName(category)}</span>
-                      <span className="text-xs sm:text-sm text-blue-600">({category._count?.products || 0})</span>
+                      <span className="text-xs sm:text-sm text-blue-600">
+                        ({allProducts.filter(p => p.categoryId === category.id).length})
+                      </span>
                     </button>
                   ))}
                 </div>
@@ -367,36 +508,20 @@ export default function ProductsPage() {
                 <h3 className="text-lg font-semibold text-slate-800 mb-4">{t.priceRange}</h3>
                 <div className="space-y-4">
                   <Slider
-                    value={[filters.minPrice, filters.maxPrice]}
-                    onValueChange={([min, max]) => updatePriceRange(min, max)}
+                    value={[minPrice, maxPrice]}
+                    onValueChange={handlePriceRangeChange}
                     max={priceRange.max}
                     min={priceRange.min}
                     step={5000}
                     className="w-full"
                   />
                   <div className="flex items-center justify-between text-xs sm:text-sm text-slate-700">
-                    <span>{formatPrice(filters.minPrice)}</span>
-                    <span>{formatPrice(filters.maxPrice)}</span>
+                    <span>{formatPrice(minPrice)}</span>
+                    <span>{formatPrice(maxPrice)}</span>
                   </div>
                 </div>
               </CardContent>
             </Card>
-
-            {availableMaterials.length > 0 && (
-              <Card className="border-slate-200 shadow-lg">
-                <CardContent className="p-4 sm:p-6">
-                  <h3 className="text-lg font-semibold text-slate-800 mb-4">{t.material}</h3>
-                  <div className="space-y-2">
-                    {availableMaterials.slice(0, 5).map((material, index) => (
-                      <Label key={index} className="flex items-center space-x-2 text-sm">
-                        <input type="checkbox" className="rounded border-slate-300" />
-                        <span className="text-slate-700">{material}</span>
-                      </Label>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            )}
           </div>
 
           {/* Main Content */}
@@ -405,7 +530,7 @@ export default function ProductsPage() {
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4 sm:mb-6">
               <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
                 <span className="text-sm sm:text-base text-slate-700">
-                  {`${totalCount} ${t.productsFound}`}
+                  {`${filteredAndSortedProducts.length} ${t.productsFound}`}
                 </span>
                 
                 <div className="flex items-center space-x-2">
@@ -428,7 +553,7 @@ export default function ProductsPage() {
                 </div>
               </div>
 
-              <Select value={filters.sortBy} onValueChange={updateSortBy}>
+              <Select value={sortBy} onValueChange={handleSortChange}>
                 <SelectTrigger className="w-full sm:w-48 border-slate-300 focus:border-blue-600">
                   <SelectValue placeholder={t.sortBy} />
                 </SelectTrigger>
@@ -443,7 +568,7 @@ export default function ProductsPage() {
             </div>
 
             {/* Products Grid */}
-            {products.length === 0 ? (
+            {paginatedProducts.length === 0 ? (
               <div className="text-center py-12">
                 <p className="text-slate-600 text-lg">{t.noProducts}</p>
                 <Button onClick={resetFilters} className="mt-4">
@@ -456,7 +581,7 @@ export default function ProductsPage() {
                   ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3' 
                   : 'grid-cols-1'
               }`}>
-                {products.map(product => {
+                {paginatedProducts.map(product => {
                   const images = getProductImages(product);
                   const mainImage = images[0] || 'https://images.pexels.com/photos/1350789/pexels-photo-1350789.jpeg?auto=compress&cs=tinysrgb&w=500&h=400';
                   
@@ -473,7 +598,7 @@ export default function ProductsPage() {
                         }`}>
                           <Image
                             src={mainImage}
-                            alt={getProductName(product)}
+                            alt={getProductName(product, language)}
                             width={400}
                             height={300}
                             className={`object-cover group-hover:scale-110 transition-transform duration-500 ${
@@ -483,7 +608,7 @@ export default function ProductsPage() {
                           />
                           <div className="absolute top-2 sm:top-4 left-2 sm:left-4">
                             <Badge className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-xs sm:text-sm">
-                              {getProductBadge(product, filters.language)}
+                              {getProductBadge(product, language)}
                             </Badge>
                           </div>
                           <div className="absolute top-2 sm:top-4 right-2 sm:right-4 flex space-x-2">
@@ -504,7 +629,7 @@ export default function ProductsPage() {
                         
                         <div className={`p-4 sm:p-6 ${viewMode === 'list' ? 'sm:flex-1' : ''}`}>
                           <h3 className="text-lg sm:text-xl font-semibold text-slate-800 mb-2 group-hover:text-blue-600 transition-colors line-clamp-2">
-                            {getProductName(product, filters.language)}
+                            {getProductName(product, language)}
                           </h3>
                           
                           <div className="flex items-center mb-3">
@@ -522,8 +647,8 @@ export default function ProductsPage() {
                           </div>
 
                           <div className="text-xs sm:text-sm text-slate-600 mb-3 space-y-1">
-                            <p>{t.material}: {getProductMaterial(product, filters.language)}</p>
-                            <p className="hidden sm:block">{product.dimensions}</p>
+                            <p>{t.material}: {product.material || 'Wood'}</p>
+                            <p className="hidden sm:block">{product.dimensions || 'N/A'}</p>
                           </div>
                           
                           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-2">
@@ -576,7 +701,7 @@ export default function ProductsPage() {
                     size="sm" 
                     className="border-slate-300 text-slate-700 hover:bg-blue-50 hover:border-blue-600 text-xs sm:text-sm px-2 sm:px-3"
                     disabled={currentPage === 1}
-                    onClick={() => updatePage(currentPage - 1)}
+                    onClick={() => handlePageChange(currentPage - 1)}
                   >
                     {t.previous}
                   </Button>
@@ -592,7 +717,7 @@ export default function ProductsPage() {
                           "bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-3 sm:px-4" :
                           "border-slate-300 text-slate-700 hover:bg-blue-50 hover:border-blue-600 px-3 sm:px-4"
                         }
-                        onClick={() => updatePage(pageNum)}
+                        onClick={() => handlePageChange(pageNum)}
                       >
                         {pageNum}
                       </Button>
@@ -604,7 +729,7 @@ export default function ProductsPage() {
                     size="sm" 
                     className="border-slate-300 text-slate-700 hover:bg-blue-50 hover:border-blue-600 text-xs sm:text-sm px-2 sm:px-3"
                     disabled={currentPage === totalPages}
-                    onClick={() => updatePage(currentPage + 1)}
+                    onClick={() => handlePageChange(currentPage + 1)}
                   >
                     {t.next}
                   </Button>
