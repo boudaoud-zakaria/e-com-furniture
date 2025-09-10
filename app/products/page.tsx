@@ -204,32 +204,33 @@ export default function ProductsPage() {
       try {
         setIsLoading(true);
         console.log("Loading all data...");
-        
-        // Load all data in parallel
-        const [productsData, categoriesData, priceRangeData, materialsData] = await Promise.all([
-          fetchAllProducts(),
-          fetchCategories(),
-          fetchPriceRange(),
-          fetchMaterials()
-        ]);
-
+        // 1️⃣ Fetch products
+        const productsData = await fetchAllProducts();
         setAllProducts(productsData);
+        setIsLoading(false);
+
+        // 2️⃣ Fetch categories
+        const categoriesData = await fetchCategories();
         setCategories(categoriesData);
+
+        // 3️⃣ Fetch price range
+        const priceRangeData = await fetchPriceRange();
         setPriceRange(priceRangeData);
         setMinPrice(priceRangeData.min);
         setMaxPrice(priceRangeData.max);
+
+        // 4️⃣ Fetch materials
+        const materialsData = await fetchMaterials();
         setAvailableMaterials(materialsData);
-        
-        console.log("All data loaded successfully");
       } catch (error) {
-        console.error("Error loading data:", error);
+        console.error("❌ Error loading data:", error);
       } finally {
-        setIsLoading(false);
       }
     };
 
     loadData();
   }, []);
+
 
   // CLIENT-SIDE FILTERING AND SORTING (super fast!)
   const filteredAndSortedProducts = useMemo(() => {
