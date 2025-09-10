@@ -1,31 +1,100 @@
-'use server';
+'use server'
 
 import { PrismaClient } from '@prisma/client';
 
-// Create a singleton instance
-const globalForPrisma = globalThis as unknown as {
-  prisma: PrismaClient | undefined;
-};
+// Singleton pattern
+declare global {
+  var prisma: PrismaClient | undefined;
+}
 
-const prisma = globalForPrisma.prisma ?? new PrismaClient();
+const prisma = global.prisma || new PrismaClient();
 
-if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
+if (process.env.NODE_ENV !== 'production') {
+  global.prisma = prisma;
+}
 
-// Cache for categories (valid for 5 minutes)
-let categoriesCache: any = null;
-let categoriesCacheTime = 0;
-const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+// Cache for static data
+let categoriesCache: any[] | null = null;
+let priceRangeCache: { min: number; max: number } | null = null;
+let materialsCache: string[] | null = null;
 
-export async function getCategories() {
+// Fetch ALL products at once (no filtering, no pagination)
+export async function fetchAllProducts() {
   try {
-    // Return cached data if still valid
-    if (categoriesCache && Date.now() - categoriesCacheTime < CACHE_DURATION) {
-      return categoriesCache;
-    }
+    console.log("Fetching ALL products...");
 
+    const products = await prisma.product.findMany({
+      where: {
+        isActive: true
+      },
+      select: {
+        id: true,
+        name: true,
+        nameAr: true,
+        nameEn: true,
+        description: true,
+        price: true,
+        originalPrice: true,
+        categoryId: true,
+        material: true,
+        dimensions: true,
+        images: true,
+        rating: true,
+        reviewCount: true,
+        stock: true,
+        salesCount: true,
+        isFeatured: true,
+        isActive: true
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    console.log(`Fetched ${products.length} products`);
+
+    // Format products
+    const formattedProducts = products.map(product => ({
+      id: product.id,
+      name: product.name,
+      nameAr: product.nameAr,
+      nameEn: product.nameEn,
+      description: product.description,
+      price: product.price,
+      originalPrice: product.originalPrice,
+      categoryId: product.categoryId,
+      images: product.images,
+      rating: product.rating || 4.0,
+      reviewCount: product.reviewCount || 0,
+      stock: product.stock || 0,
+      material: product.material,
+      dimensions: product.dimensions,
+      salesCount: product.salesCount || 0,
+      isFeatured: product.isFeatured,
+      isActive: product.isActive
+    }));
+
+    return formattedProducts;
+
+  } catch (error) {
+    console.error('Error fetching all products:', error);
+    return [];
+  }
+}
+
+// Fetch categories (with caching)
+export async function fetchCategories() {
+  if (categoriesCache) {
+    return categoriesCache;
+  }
+
+  try {
     const categories = await prisma.category.findMany({
       where: { isActive: true },
-      include: {
+      select: {
+        id: true,
+        name: true,
+        nameAr: true,
+        nameEn: true,
+        image: true,
         _count: {
           select: { 
             products: {
@@ -37,86 +106,29 @@ export async function getCategories() {
       orderBy: { name: 'asc' }
     });
 
-    const formattedCategories = categories.map(category => ({
+    categoriesCache = categories.map(category => ({
       id: category.id,
       name: category.name,
       nameAr: category.nameAr,
       nameEn: category.nameEn,
-      image: category.image || 'https://images.pexels.com/photos/1350789/pexels-photo-1350789.jpeg?auto=compress&cs=tinysrgb&w=400&h=300',
-      count: category._count.products,
-      _count: { products: category._count.products }
+      image: category.image,
+      count: category._count.products
     }));
 
-    // Update cache
-    categoriesCache = formattedCategories;
-    categoriesCacheTime = Date.now();
-
-    return formattedCategories;
+    console.log(`Cached ${categoriesCache.length} categories`);
+    return categoriesCache;
   } catch (error) {
     console.error('Error fetching categories:', error);
     return [];
   }
 }
 
-export async function getFeaturedProducts() {
-  try {
-    const products = await prisma.product.findMany({
-      where: { 
-        isActive: true, 
-        isFeatured: true 
-      },
-      include: { 
-        category: {
-          select: {
-            id: true,
-            name: true,
-            nameAr: true,
-            nameEn: true
-          }
-        }
-      },
-      orderBy: { salesCount: 'desc' },
-      take: 6 // Show top 6 featured products
-    });
-
-    return products.map(product => ({
-      id: product.id,
-      name: {
-        fr: product.name,
-        ar: product.nameAr,
-        en: product.nameEn
-      },
-      price: product.price,
-      originalPrice: product.originalPrice || Math.round(product.price * 1.3),
-      image: (() => {
-        try {
-          const images = JSON.parse(product.images || '[]');
-          return images[0] || 'https://images.pexels.com/photos/1350789/pexels-photo-1350789.jpeg?auto=compress&cs=tinysrgb&w=500&h=400';
-        } catch {
-          return 'https://images.pexels.com/photos/1350789/pexels-photo-1350789.jpeg?auto=compress&cs=tinysrgb&w=500&h=400';
-        }
-      })(),
-      rating: product.rating,
-      reviews: product.reviewCount,
-      badge: {
-        fr: product.salesCount > 50 ? 'Meilleure Vente' : 'Nouveau',
-        ar: product.salesCount > 50 ? 'الأكثر مبيعاً' : 'جديد',
-        en: product.salesCount > 50 ? 'Best Seller' : 'New'
-      },
-      stock: product.stock || 0,
-      reviewCount: product.reviewCount || 0,
-      dimensions: product.dimensions || 'N/A',
-      material: product.material || 'Wood'
-    }));
-  } catch (error) {
-    console.error('Error fetching featured products:', error);
-    return [];
+// Fetch price range (with caching)
+export async function fetchPriceRange() {
+  if (priceRangeCache) {
+    return priceRangeCache;
   }
-}
 
-// Add these additional optimized functions that your store might need
-
-export async function getPriceRange() {
   try {
     const result = await prisma.product.aggregate({
       where: { isActive: true },
@@ -124,17 +136,25 @@ export async function getPriceRange() {
       _max: { price: true }
     });
 
-    return {
+    priceRangeCache = {
       min: result._min.price || 0,
       max: result._max.price || 150000
     };
+
+    console.log("Cached price range:", priceRangeCache);
+    return priceRangeCache;
   } catch (error) {
     console.error('Error fetching price range:', error);
     return { min: 0, max: 150000 };
   }
 }
 
-export async function getMaterials(language: 'fr' | 'ar' | 'en' = 'fr') {
+// Fetch materials (with caching)
+export async function fetchMaterials() {
+  if (materialsCache) {
+    return materialsCache;
+  }
+
   try {
     const products = await prisma.product.findMany({
       where: { 
@@ -142,15 +162,26 @@ export async function getMaterials(language: 'fr' | 'ar' | 'en' = 'fr') {
         material: { not: undefined }
       },
       select: { material: true },
-      distinct: ['material']
+      distinct: ['material'],
+      take: 10
     });
 
-    return products
+    materialsCache = products
       .map(p => p.material)
-      .filter(Boolean)
-      .slice(0, 10); // Limit to 10 materials
+      .filter(Boolean);
+
+    console.log(`Cached ${materialsCache.length} materials`);
+    return materialsCache;
   } catch (error) {
     console.error('Error fetching materials:', error);
     return [];
   }
+}
+
+// Clear cache function (call when data is updated)
+export async function clearCache() {
+  categoriesCache = null;
+  priceRangeCache = null;
+  materialsCache = null;
+  console.log("Cache cleared");
 }
